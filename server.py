@@ -1397,6 +1397,10 @@ class Handler(BaseHTTPRequestHandler):
         p = unquote(self.path.split("?")[0])
         if p in ("/", "/index.html"):
             return self._file(HERE / "index.html", "text/html; charset=utf-8")
+        if p.startswith("/assets/") and "/" not in p[len("/assets/"):] and ".." not in p:
+            f = HERE / "assets" / p[len("/assets/"):]
+            if f.is_file():
+                return self._file(f, mimetypes.guess_type(f.name)[0] or "application/octet-stream")
         if p == "/i18n.js":
             return self._file(HERE / "i18n.js", "text/javascript; charset=utf-8")
         if p == "/api/setup":

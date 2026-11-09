@@ -1,3 +1,5 @@
+<img src="assets/icon-512.png" width="128" alt="vpipe Workbench icon">
+
 # vpipe工作台 · vpipe Workbench
 
 A small local web page for running **MiniMax H3** (video with sound) and **Qwen Image 2.1 Turbo** (images) on a Mac, through the [vpipe](https://github.com/tgo-app-dev/vpipe) command-line engine. Everything runs on your own machine: no cloud, no credits.

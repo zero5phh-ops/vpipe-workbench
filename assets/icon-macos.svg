@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b2a20"/>
+      <stop offset="1" stop-color="#140f0c"/>
+    </linearGradient>
+    <linearGradient id="pipe" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fffaf3"/>
+      <stop offset="1" stop-color="#fed7aa"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde68a"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: 824 px rounded square centred on the 1024 canvas -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bg)"/>
+  <g transform="translate(512 512) scale(1.12) translate(-512 -470)">
+  <!-- the pipeline: a rounded pipe with three nodes feeding the player -->
+  <rect x="214" y="533" width="330" height="58" rx="29" fill="url(#pipe)"/>
+  <circle cx="262" cy="562" r="40" fill="#140f0c" stroke="url(#pipe)" stroke-width="22"/>
+  <circle cx="378" cy="562" r="40" fill="#140f0c" stroke="url(#pipe)" stroke-width="22"/>
+  <circle cx="494" cy="562" r="40" fill="#140f0c" stroke="url(#pipe)" stroke-width="22"/>
+  <!-- play triangle (video) with rounded corners -->
+  <path d="M556 358 Q556 318 591 338 L790 459 Q824 480 790 501 L591 622 Q556 642 556 602 Z"
+        transform="translate(0 80)" fill="url(#play)"/>
+  <!-- AI sparkle -->
+  <path d="M740 196 C748 252 768 272 824 280 C768 288 748 308 740 364 C732 308 712 288 656 280 C712 272 732 252 740 196 Z"
+        fill="url(#spark)"/>
+  <path d="M630 316 C634 340 642 348 666 352 C642 356 634 364 630 388 C626 364 618 356 594 352 C618 348 626 340 630 316 Z"
+        fill="url(#spark)" opacity=".85"/>
+  </g>
+</svg>
