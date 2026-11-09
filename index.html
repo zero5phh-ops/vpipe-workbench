@@ -1,0 +1,1251 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vpipe工作台</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --ink: #1d1d1f; --muted: #6e6e73;
+    --line: #e3e1dc; --accent: #c2410c; --accent-ink: #fff; --ok: #15803d; --bad: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161616; --card: #1f1f1f; --ink: #f2f2f2; --muted: #a1a1a6;
+            --line: #333; --accent: #f97316; --accent-ink: #111; --ok: #4ade80; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  .pv { margin: 6px 0 12px; border-radius: 10px; overflow: hidden; background: var(--bg);
+        min-height: 120px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .pv img, .pv video { max-width: 100%; max-height: 480px; display: block; }
+  .pv .pvtag { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.6); color: #fff;
+               font-size: 12px; padding: 2px 8px; border-radius: 99px; }
+  .pvwait { color: var(--muted); font-size: 13px; padding: 20px; text-align: center; }
+  .draftbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px;
+              border-radius: 10px; background: var(--bg); }
+  .mini { margin-left: 8px; font: inherit; font-size: 12px; font-weight: 400; padding: 3px 10px; border-radius: 99px;
+          border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  .qi { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .qi:first-child { border-top: 0; }
+  .qi .qn { color: var(--muted); width: 22px; }
+  .qi .qp { flex: 1; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qi button { border: 1px solid var(--bad); color: var(--bad); background: transparent; border-radius: 99px;
+               padding: 2px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .tg { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .tg input { width: 18px; height: 18px; accent-color: var(--accent); }
+  #bgmStyle { flex: 1; min-width: 220px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+              background: var(--bg); color: var(--ink); font: inherit; }
+  #bgmStyle:disabled { opacity: .45; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, "PingFang TC", "Helvetica Neue", sans-serif; }
+  main { max-width: 1600px; margin: 0 auto; padding: 24px 16px 60px; }
+  .cols { display: grid; grid-template-columns: minmax(380px, 540px) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .col-left { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto;
+              border-radius: 14px; scrollbar-width: thin; }
+  .col-left .card { margin-bottom: 0; }
+  .col-right { min-width: 0; }
+  #form { padding: 18px 20px; }
+  .grp { padding: 16px 0; border-top: 1px solid var(--line); }
+  .grp.last { padding-bottom: 0; }
+  .grph { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+  .grph small { font-weight: 400; color: var(--muted); }
+  .grpact { margin-left: auto; display: flex; align-items: center; gap: 6px; font-weight: 400; }
+  .grpact .hint { margin: 0; }
+  .tg.sm { font-weight: 400; font-size: 13px; color: var(--muted); margin-left: auto; }
+  .tg.sm input { width: 15px; height: 15px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .fld { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .fld.wide { grid-column: 1 / -1; }
+  .fld select, .fld input[type=number] { width: 100%; font-size: 14px; color: var(--ink); }
+  #secRow { margin-top: 12px; }
+  #secRow b { color: var(--ink); }
+  .seg.sm button { padding: 6px 12px; font-size: 13px; }
+  .aibtn { font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px; border-radius: 99px; border: 0; cursor: pointer;
+           background: linear-gradient(135deg, #7c3aed, #db2777); color: #fff; }
+  .aibtn:disabled { opacity: .5; cursor: wait; }
+  .ainote { border: 1px solid var(--line); padding: 8px 10px; border-radius: 8px; }
+  .hint.warn { color: var(--bad); }
+  #bgmStyle { margin-top: 10px; width: 100%; }
+  .cardhead { display: flex; align-items: center; gap: 10px; }
+  .cardhead label.h { margin: 0; }
+  .fold { margin-left: auto; font: inherit; font-size: 12px; padding: 3px 12px; border-radius: 99px; border: 1px solid var(--line);
+          background: transparent; color: var(--muted); cursor: pointer; }
+  .card.folded > :not(.cardhead) { display: none !important; }
+  .card:not(.folded) > .cardhead { margin-bottom: 12px; }
+  .vslot video { width: 100%; height: 100%; object-fit: cover; }
+  .item.seedhit { outline: 3px solid var(--ok); outline-offset: -1px; }
+  .item.seedhit .seedtag { color: var(--ok); font-weight: 700; }
+  .col-right .pv img, .col-right .pv video { max-height: 70vh; }
+  @media (max-width: 960px) {
+    .cols { grid-template-columns: 1fr; }
+    .col-left { position: static; max-height: none; overflow: visible; }
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+          padding: 20px; margin-bottom: 18px; }
+  label.h { display: block; font-weight: 600; margin: 0 0 8px; }
+  .row { margin-bottom: 18px; }
+  .seg { display: flex; flex-wrap: wrap; gap: 8px; }
+  .seg button { border: 1px solid var(--line); background: transparent; color: var(--ink);
+                padding: 8px 14px; border-radius: 999px; cursor: pointer; font: inherit; }
+  .seg button:disabled { opacity: .35; cursor: not-allowed; }
+  .delbtn { display: block; margin-top: 8px; border: 1px solid var(--line); color: var(--bad); background: transparent;
+            border-radius: 99px; padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+  .delbtn:hover { border-color: var(--bad); }
+  .seg button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .seg button small { color: inherit; opacity: .65; margin-left: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  textarea { width: 100%; min-height: 130px; padding: 12px; border-radius: 10px; resize: vertical;
+             border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  input[type=number] { width: 140px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+                       background: var(--bg); color: var(--ink); font: inherit; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .est { display: flex; flex-wrap: wrap; gap: 18px; padding: 12px 14px; border-radius: 10px;
+         background: var(--bg); font-size: 14px; }
+  .est b { font-variant-numeric: tabular-nums; }
+  .go { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+  .btn { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
+         padding: 11px 22px; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  .err { color: var(--bad); font-size: 14px; }
+  .bar { height: 10px; background: var(--bg); border-radius: 99px; overflow: hidden; margin: 10px 0; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .5s; }
+  .stat { display: flex; flex-wrap: wrap; gap: 18px; font-size: 14px; color: var(--muted); }
+  .stat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  pre { background: var(--bg); padding: 10px; border-radius: 8px; font-size: 11px; overflow-x: auto;
+        white-space: pre-wrap; word-break: break-all; color: var(--muted); max-height: 120px; }
+  .hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .item { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+  .item video, .item img { width: 100%; display: block; background: #000; }
+  .item .meta { padding: 10px 12px; font-size: 12px; color: var(--muted); }
+  .item .meta p { color: var(--ink); margin: 0 0 6px; font-size: 13px;
+                  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); margin-right: 4px; }
+  .tag.done { color: var(--ok); border-color: var(--ok); }
+  .tag.failed, .tag.stopped { color: var(--bad); border-color: var(--bad); }
+  .empty { color: var(--muted); font-size: 14px; }
+  .refs { display: flex; flex-wrap: wrap; gap: 10px; }
+  .refs .thumb { position: relative; width: 96px; height: 96px; border-radius: 10px; overflow: hidden;
+                 border: 1px solid var(--line); }
+  .refs .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .refs .thumb button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%;
+                        border: 0; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; line-height: 22px; padding: 0; }
+  .addref { width: 96px; height: 96px; border-radius: 10px; border: 1px dashed var(--muted); color: var(--muted);
+            display: flex; align-items: center; justify-content: center; font-size: 13px; cursor: pointer; text-align: center; }
+  .slots { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+  .slot { position: relative; width: 132px; height: 96px; border-radius: 10px; border: 1px dashed var(--muted);
+          display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden;
+          color: var(--muted); font-size: 13px; background: var(--bg); }
+  .slot span { position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,.55); color: #fff;
+               padding: 1px 8px; border-radius: 99px; font-size: 12px; }
+  .slot.empty span { position: static; background: none; color: var(--muted); padding: 0; font-size: 13px; }
+  .slot img { width: 100%; height: 100%; object-fit: cover; }
+  .slot button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%;
+                 border: 0; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; padding: 0; }
+  .mentionwrap { position: relative; }
+  .mention { position: absolute; left: 12px; right: 12px; top: 100%; margin-top: 4px; z-index: 20; max-height: 280px; overflow-y: auto;
+             background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; }
+  .mention .mi { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  .mention .mi img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; flex: none; }
+  .mention .mi small { color: var(--muted); margin-left: auto; }
+  .mention .mi.on, .mention .mi:hover { background: var(--bg); }
+  .mention .mnone { padding: 10px; color: var(--muted); font-size: 13px; }
+  .libgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+  .libitem { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--bg); }
+  .libitem img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #000; }
+  .libitem .ln { padding: 6px 8px 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .libitem .lb { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 8px; }
+  .libitem .lb button, .libitem .lb select { font: inherit; font-size: 11px; padding: 2px 7px; border-radius: 99px;
+       border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  .libitem .lb .dz { color: var(--bad); }
+  .libitem.pick { cursor: pointer; }
+  .libitem.pick:hover { outline: 2px solid var(--accent); }
+  .libempty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modalbox { background: var(--card); border-radius: 14px; padding: 16px; width: min(760px, 100%); max-height: 85vh; overflow-y: auto; }
+  .modalhead { display: flex; justify-content: space-between; align-items: center; }
+  .savebox { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+  .savebox input { flex: 1; min-width: 90px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: 12px; }
+  .savebox select, .savebox button { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+  .savebtn { display: inline-block; margin: 8px 6px 0 0; border: 1px solid var(--line); background: transparent; color: var(--ink);
+             border-radius: 99px; padding: 3px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+  .item .delbtn { display: inline-block; }
+  .slot.libslot { border-style: dotted; }
+  .refgroup { margin-top: 12px; }
+  .rgh { font-size: 13px; font-weight: 600; }
+  .rgh small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .refgroup .slots { margin-top: 6px; }
+  .item .reflist { display: flex; gap: 4px; margin-top: 6px; }
+  .item .reflist img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; background: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>vpipe工作台</h1>
+  <p class="sub">在這台 Mac 本機生成 · 可排隊，一次跑一個 · 結果存在 ~/vpipe-work/jobs/</p>
+
+  <div class="cols">
+  <div class="col-left">
+  <section class="card" id="form">
+    <div class="row">
+      <div class="seg" id="model">
+        <button data-v="h3" class="on">MiniMax H3 <small>影片＋聲音</small></button>
+        <button data-v="qwen">Qwen Image 2.1 <small>圖片</small></button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grph">畫面設定 <label class="tg sm" id="draftRow"><input type="checkbox" id="draftOn"> 草稿模式</label></div>
+      <div class="fields">
+        <label class="fld"><span>大小</span><select id="size"></select></label>
+        <label class="fld" id="stepRow"><span>加速</span><select id="accel">
+          <option value="turbo">Turbo</option><option value="pika">Pika Flex</option><option value="none">不加速</option>
+        </select></label>
+        <label class="fld" id="stepRow2"><span>步數</span><select id="steps">
+          <option value="4">4 步</option><option value="6" selected>6 步</option><option value="8">8 步</option>
+        </select></label>
+      </div>
+      <div class="fld wide" id="secRow"><span>秒數 <b id="secVal">3</b> 秒</span>
+        <input type="range" id="seconds" min="1" max="10" step="1" value="3"></div>
+    </div>
+
+    <div class="grp" id="vidRow">
+      <div class="grph">參考畫面</div>
+      <div class="seg sm" id="vmode">
+        <button data-v="text" class="on">純文字</button>
+        <button data-v="frames">首幀／尾幀</button>
+        <button data-v="refs">參考圖</button>
+      </div>
+      <div id="vFrames" class="slots" hidden>
+        <div class="slot" data-k="first"><span>首幀</span></div>
+        <div class="slot" data-k="last"><span>尾幀</span></div>
+      </div>
+      <div id="vEngine" class="seg sm" hidden style="margin-top:10px">
+        <button data-v="like" class="on">零樣本（FL2VA）</button>
+        <button data-v="ref2va">正式 Ref2VA</button>
+      </div>
+      <div id="vRefs" hidden>
+        <div class="refgroup"><div class="rgh">人物 <small>最多 5 位</small></div><div class="slots" data-g="person"></div></div>
+        <div class="refgroup"><div class="rgh">場景 <small>1 張</small></div><div class="slots" data-g="scene"></div></div>
+        <div class="refgroup"><div class="rgh">物品 <small>最多 5 件</small></div><div class="slots" data-g="object"></div></div>
+        <div class="refgroup"><div class="rgh">動作影片 <small>1 段，例如跳舞 Reel</small></div>
+          <div class="slots"><div class="slot vslot" id="vidSlot"><span>＋ 影片</span></div></div>
+          <div class="fields" id="vidOpts" hidden style="margin-top:8px">
+            <label class="fld"><span>從第幾秒開始</span><input type="number" id="vidStart" min="0" step="0.5" value="0"></label>
+            <label class="tg" style="align-self:end"><input type="checkbox" id="vidAudio"> 用原片音樂</label>
+          </div>
+        </div>
+        <div class="hint" id="refCount"></div>
+      </div>
+    </div>
+
+    <div class="grp" id="refRow" hidden>
+      <div class="grph">參考圖 <small>最多 3 張</small></div>
+      <div class="refs" id="refs">
+        <label class="addref">＋ 加入圖片<input type="file" id="refFile" accept="image/*" multiple hidden></label>
+        <div class="addref" id="qLib">從圖庫選</div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grph">Prompt
+        <span class="grpact"><button class="mini" id="tplSheet" hidden>人物設定圖模板</button>
+        <span id="aiRow"><span class="hint" id="aiStatus"></span><button class="mini" id="aiUndo" hidden>↩ 還原</button><button class="aibtn" id="aiGo">✨ AI 優化</button></span></span>
+      </div>
+      <div class="mentionwrap">
+        <textarea id="prompt" placeholder="用中文或英文寫想法都可以，再按 ✨ AI 優化。輸入 @ 插入參考圖。"></textarea>
+        <div class="mention" id="mention" hidden></div>
+      </div>
+      <div class="hint ainote" id="aiNote" hidden></div>
+    </div>
+
+    <div class="grp" id="audRow">
+      <div class="grph">聲音與台詞</div>
+      <div class="toggles">
+        <label class="tg"><input type="checkbox" id="audioOn" checked> 聲音</label>
+        <label class="tg"><input type="checkbox" id="bgmOn"> 背景音樂</label>
+        <label class="tg"><input type="checkbox" id="wantSubs"> 字幕</label>
+      </div>
+      <input type="text" id="bgmStyle" placeholder="音樂風格，例如 soft piano, lo-fi" disabled hidden>
+      <div id="dlgRow">
+        <div class="fields" style="margin-top:12px">
+          <label class="fld wide"><span>台詞語言</span><select id="dlgLang">
+            <option value="Chinese">中文</option>
+            <option value="English">English</option>
+            <option value="Malay">馬來語</option>
+            <option value="Manglish">Manglish（馬來西亞口音英文）</option>
+            <option value="MYmix">🇲🇾 馬來西亞混搭</option>
+            <option value="Japanese">日本語</option>
+          </select></label>
+        </div>
+        <textarea id="dialogue" style="min-height:64px;margin-top:8px" placeholder="一行一句，可寫「誰：台詞」，例如&#10;the gym guy: Hi ah moi, keen to train at our gym leh?"></textarea>
+        <div class="hint warn" id="myHint" hidden></div>
+        <div class="hint" id="myLines" hidden></div>
+      </div>
+    </div>
+
+    <div class="grp last">
+      <div class="fields">
+        <label class="fld"><span>Seed</span><select id="seedSel"><option value="random">隨機生成</option><option value="custom">自己輸入號碼</option></select></label>
+        <label class="fld" id="seedBox" hidden><span>號碼</span><input type="number" id="seed" placeholder="例如 2611"></label>
+      </div>
+      <div class="est" id="est"></div>
+      <div class="go">
+        <button class="btn" id="run">開始生成</button>
+        <span class="err" id="err"></span>
+      </div>
+    </div>
+  </section>
+  </div>
+
+  <div class="col-right">
+  <section class="card" id="queueCard" hidden>
+    <label class="h">排隊中 <span id="qCount" style="font-weight:400;color:var(--muted)"></span></label>
+    <div id="qList"></div>
+  </section>
+
+  <section class="card" id="statusCard" hidden>
+    <label class="h" id="stTitle">生成中</label>
+    <div class="pv" id="pv"><div class="pvwait">等第一步完成就會出現預覽</div></div>
+    <div class="bar"><div id="stBar"></div></div>
+    <div class="stat">
+      <span>階段 <b id="stStage">—</b></span>
+      <span>進度 <b id="stPct">0%</b></span>
+      <span>已用時間 <b id="stElapsed">—</b></span>
+      <span>粗估總時間 <b id="stEta">—</b></span>
+      <span>Token <b id="stTok">—</b></span>
+    </div>
+    <pre id="stLog"></pre>
+    <button class="btn ghost" id="stop">停止</button>
+  </section>
+
+  <section class="card" id="libCard">
+    <div class="cardhead"><label class="h">參考圖庫</label><button class="fold" data-fold="libCard">收起</button></div>
+    <div class="seg" id="libTabs">
+      <button data-v="person" class="on">人物 <small id="libN-person"></small></button>
+      <button data-v="scene">場景 <small id="libN-scene"></small></button>
+      <button data-v="object">物品 <small id="libN-object"></small></button>
+    </div>
+    <div class="libgrid" id="libGrid"></div>
+  </section>
+
+  <div class="modal" id="picker" hidden>
+    <div class="modalbox">
+      <div class="modalhead"><b id="pickerTitle">從圖庫選擇</b><button class="mini" id="pickerClose">關閉</button></div>
+      <div class="libgrid" id="pickerGrid"></div>
+    </div>
+  </div>
+
+  <section class="card" id="histCard">
+    <div class="cardhead"><label class="h">歷史紀錄</label><button class="fold" data-fold="histCard">收起</button></div>
+    <div class="hist" id="hist"></div>
+  </section>
+  </div>
+  </div>
+</main>
+
+<script>
+// Every POST is JSON: the server refuses anything else (blocks other websites).
+{
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (url, opt = {}) => {
+    if ((opt.method || "GET").toUpperCase() === "POST")
+      opt = { ...opt, headers: { "Content-Type": "application/json", ...(opt.headers || {}) } };
+    return realFetch(url, opt);
+  };
+}
+const $ = s => document.querySelector(s);
+const PROMPTS = {
+  h3: "Cinematic shot of a young East Asian woman walking along a quiet Taipei alley at dusk, warm shop lights, light rain on the pavement, the camera tracks slowly beside her. Sound: soft rain, distant scooter, footsteps.",
+  qwen: "A cozy café corner on a rainy afternoon, a cup of latte with heart latte art on a wooden table, soft window light, film photography look."
+};
+let cfg, model = "h3", size = null;
+
+function fmt(s) {
+  if (s == null) return "—";
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h} 小時 ${m} 分` : m ? `${m} 分 ${sec} 秒` : `${sec} 秒`;
+}
+
+function renderSizes() {
+  const box = $("#size");
+  const sizes = cfg.sizes[model];
+  if (!size || !(size in sizes)) size = Object.keys(sizes)[0];
+  box.innerHTML = Object.entries(sizes).map(([k, [w, h]]) => `<option value="${k}">${k}　${w}×${h}</option>`).join("");
+  box.value = size;
+  $("#secRow").hidden = model !== "h3";
+  $("#refRow").hidden = model !== "qwen";
+  $("#vidRow").hidden = model !== "h3";
+  $("#audRow").hidden = model !== "h3";
+  $("#stepRow").hidden = model !== "h3";
+  $("#stepRow2").hidden = model !== "h3";
+  $("#dlgRow").hidden = model !== "h3";
+  $("#draftRow").hidden = model !== "h3";
+  $("#tplSheet").hidden = model !== "qwen";
+  $("#aiRow").hidden = false;   // H3: prompt + dialogue; Qwen: image prompt
+  stepHint();
+}
+
+// H3 steps (4/6/8) and the Turbo LoRA. Time scales almost linearly with steps.
+let steps = 6;
+// Speed-up adapter and the step count it really runs.
+let accel = "turbo", engine = "like";
+function lockedSteps() {
+  if (accel === "pika") return 6;                                   // Pika's manifest fixes 6
+  return null;
+}
+$("#size").onchange = () => {
+  size = $("#size").value;
+  if (!size.startsWith("草稿")) $("#draftOn").checked = false;
+  renderSizes(); updateEst();
+};
+function stepHint() {
+  const lock = lockedSteps();
+  $("#steps").disabled = lock !== null;
+  $("#steps").value = String(lock ?? steps);
+  $("#steps").title = accel === "pika" ? "Pika Flex 固定 6 步" : "";
+}
+function effSteps() { return lockedSteps() ?? steps; }
+function setAccel(v) { accel = v; $("#accel").value = v; stepHint(); updateEst(); }
+$("#accel").onchange = () => setAccel($("#accel").value);
+$("#vEngine").onclick = e => {
+  const b = e.target.closest("button"); if (!b || b.disabled) return;
+  engine = b.dataset.v;
+  document.querySelectorAll("#vEngine button").forEach(x => x.classList.toggle("on", x === b));
+  syncAccelForEngine();
+  stepHint(); updateEst();
+};
+// Ref2VA's only speed-up here is Pika (lightx2v was removed): grey out Turbo there.
+let accelBeforeRef2va = null;
+function syncAccelForEngine() {
+  const a = (cfg && cfg.avail) || {};
+  const ref2va = vmode === "refs" && engine === "ref2va";
+  const tb = document.querySelector('#accel option[value="turbo"]');
+  tb.disabled = ref2va || a.turbo === false;
+  const pb = document.querySelector('#accel option[value="pika"]');
+  pb.disabled = ref2va ? !a.pika_ref2va : !a.pika_fl2va;
+  if (ref2va && accel !== "pika") { accelBeforeRef2va = accel; setAccel("pika"); }
+  if (!ref2va && accelBeforeRef2va !== null) { setAccel(accelBeforeRef2va); accelBeforeRef2va = null; }
+  // never leave a greyed-out choice selected
+  if (document.querySelector(`#accel option[value="${accel}"]`).disabled) {
+    const ok = [...document.querySelectorAll("#accel option")].find(o => !o.disabled);
+    if (ok) setAccel(ok.value);
+  }
+}
+function applyAvail() {
+  const a = cfg.avail || {};
+  const pikaOk = a.pika_fl2va;
+  const pb = document.querySelector('#accel option[value="pika"]');
+  pb.disabled = !pikaOk; pb.textContent = pikaOk ? "Pika Flex" : "Pika Flex（未下載）";
+  const tb = document.querySelector('#accel option[value="turbo"]');
+  if (a.turbo === false) tb.textContent = "Turbo（未下載）";
+  const rb = document.querySelector('#vEngine [data-v="ref2va"]');
+  const r2ok = a.ref2va && a.pika_ref2va;
+  rb.disabled = !r2ok; rb.title = r2ok ? "" : "Ref2VA 或它的 Pika 加速還沒裝好";
+  syncAccelForEngine();
+}
+$("#steps").onchange = () => { steps = +$("#steps").value; stepHint(); updateEst(); };
+
+function syncAudio() {
+  const on = $("#audioOn").checked;
+  $("#bgmOn").disabled = !on;
+  $("#bgmStyle").disabled = !on || !$("#bgmOn").checked;
+  $("#bgmStyle").hidden = $("#bgmStyle").disabled;
+  $("#dlgRow").hidden = model !== "h3" || !on;
+}
+$("#audioOn").onchange = syncAudio;
+$("#bgmOn").onchange = syncAudio;
+function audioNote() {
+  if (model !== "h3" || !$("#audioOn").checked) return "";
+  if ($("#bgmOn").checked) {
+    const style = $("#bgmStyle").value.trim() || "gentle cinematic";
+    return `Background music: ${style} music plays softly under the natural ambient sound.`;
+  }
+  return "Audio: natural ambient sound and effects only, a quiet scene with no background music.";
+}
+
+// H3 picture control: plain text, first/last keyframes, or role-labelled references.
+let vmode = "text";
+const slotImg = {};   // key -> data URL
+const VHINT = {
+  text: "只用文字描述生成影片。",
+  frames: "放首幀＝影片從這張圖開始動；放尾幀＝影片結束在這張圖；兩張都放＝從 A 動到 B。圖會依所選大小裁切，建議用跟影片同比例的圖。",
+  refs: "放人物／場景／物品的照片，H3 會把它們用進影片（零樣本模式，像不像要看運氣，多換幾個 seed 試）。不能和首尾幀同時用。prompt 裡直接描述他們在做什麼即可。"
+};
+function renderSlots() {
+  $("#vFrames").hidden = vmode !== "frames";
+  $("#vRefs").hidden = vmode !== "refs";
+  $("#vEngine").hidden = vmode !== "refs";
+  syncAccelForEngine();
+  stepHint();
+  renderRefGroups();
+  document.querySelectorAll("#vFrames .slot").forEach(s => {
+    const k = s.dataset.k, label = s.querySelector("span").textContent;
+    s.querySelectorAll("img,button").forEach(x => x.remove());
+    s.classList.toggle("empty", !slotImg[k]);
+    if (slotImg[k]) {
+      const img = document.createElement("img"); img.src = slotImg[k]; s.prepend(img);
+      const b = document.createElement("button"); b.textContent = "×"; b.title = "移除";
+      b.onclick = ev => { ev.stopPropagation(); delete slotImg[k]; renderSlots(); updateEst(); };
+      s.appendChild(b);
+    }
+    s.querySelector("span").textContent = slotImg[k] ? label.replace("＋ ", "") : (label.startsWith("＋") ? label : "＋ " + label);
+  });
+}
+// H3 references: up to 5 people, 1 scene, 5 objects -- and H3 reads at most 9 pictures in all.
+const REF_LIMIT = { person: 5, scene: 1, object: 5 }, REF_TOTAL = 9;
+const REF_EN = { person: "person", scene: "the scene / location", object: "object" };
+const REF_ZH = { person: "人物", scene: "場景", object: "物品" };
+const refSets = { person: [], scene: [], object: [] };
+function refTotal() { return refSets.person.length + refSets.scene.length + refSets.object.length; }
+function pickImage(cb) {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = async () => {
+    if (!inp.files[0]) return;
+    try { cb(await shrink(inp.files[0])); } catch { $("#err").textContent = "讀不到這張圖"; }
+  };
+  inp.click();
+}
+// Motion reference clip (Ref2VA only): kept as a data URL, cut on the server.
+let refVideo = null;   // { data, url }
+function renderVideoSlot() {
+  const s = $("#vidSlot");
+  s.querySelectorAll("video,button").forEach(x => x.remove());
+  s.classList.toggle("empty", !refVideo);
+  $("#vidOpts").hidden = !refVideo;
+  s.querySelector("span").textContent = refVideo ? "影片" : "＋ 影片";
+  if (!refVideo) return;
+  const v = document.createElement("video");
+  v.src = refVideo.url; v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+  s.prepend(v);
+  const b = document.createElement("button"); b.textContent = "×"; b.title = "移除";
+  b.onclick = ev => { ev.stopPropagation(); URL.revokeObjectURL(refVideo.url); refVideo = null; renderVideoSlot(); updateEst(); };
+  s.appendChild(b);
+}
+$("#vidSlot").onclick = () => {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "video/*";
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return;
+    if (f.size > 150 * 1024 * 1024) { $("#err").textContent = "影片太大（超過 150MB），先剪短再放"; return; }
+    const r = new FileReader();
+    r.onload = () => {
+      refVideo = { data: r.result, url: URL.createObjectURL(f) };
+      // clips only work on the real Ref2VA partition
+      const rb = document.querySelector('#vEngine [data-v="ref2va"]');
+      if (rb && !rb.disabled && engine !== "ref2va") rb.click();
+      renderVideoSlot(); updateEst();
+    };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+};
+
+function renderRefGroups() {
+  for (const g of ["person", "scene", "object"]) {
+    const box = document.querySelector(`#vRefs .slots[data-g="${g}"]`); box.innerHTML = "";
+    refSets[g].forEach((d, i) => {
+      const t = document.createElement("div"); t.className = "slot";
+      const label = g === "scene" ? REF_ZH[g] : `${REF_ZH[g]} ${i + 1}`;
+      t.innerHTML = `<img src="${d}"><span>${label}</span><button title="移除">×</button>`;
+      t.querySelector("button").onclick = ev => { ev.stopPropagation(); refSets[g].splice(i, 1); renderRefGroups(); updateEst(); };
+      box.appendChild(t);
+    });
+    if (refSets[g].length < REF_LIMIT[g] && refTotal() < REF_TOTAL) {
+      const add = document.createElement("div"); add.className = "slot empty";
+      add.innerHTML = `<span>＋ ${REF_ZH[g]}</span>`;
+      add.onclick = () => pickImage(d => { refSets[g].push(d); renderRefGroups(); updateEst(); });
+      box.appendChild(add);
+      const lib = document.createElement("div"); lib.className = "slot empty libslot";
+      lib.innerHTML = `<span>從圖庫選</span>`;
+      lib.onclick = () => openPicker(g, d => { refSets[g].push(d); renderRefGroups(); updateEst(); });
+      box.appendChild(lib);
+    }
+  }
+  const n = refTotal();
+  $("#refCount").textContent = n ? `已放 ${n} 張（最多 9 張），prompt 裡用 person 1、object 2 指定。` : "";
+}
+document.querySelectorAll("#vFrames .slot").forEach(s => s.onclick = () => {
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+  inp.onchange = async () => {
+    if (!inp.files[0]) return;
+    try { slotImg[s.dataset.k] = await shrink(inp.files[0]); } catch { $("#err").textContent = "讀不到這張圖"; }
+    renderSlots(); updateEst();
+  };
+  inp.click();
+});
+$("#vmode").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  vmode = b.dataset.v;
+  document.querySelectorAll("#vmode button").forEach(x => x.classList.toggle("on", x === b));
+  renderSlots(); updateEst();
+};
+function h3Extras() {
+  if (model !== "h3") return {};
+  if (vmode === "frames") return { first: slotImg.first || null, last: slotImg.last || null };
+  if (vmode === "refs") {
+    const items = [];
+    refSets.person.forEach((d, i) => items.push([d, refSets.person.length > 1 ? `person ${i + 1}` : "the person"]));
+    refSets.scene.forEach(d => items.push([d, REF_EN.scene]));
+    refSets.object.forEach((d, i) => items.push([d, refSets.object.length > 1 ? `object ${i + 1}` : "the object / product"]));
+    if (!items.length && !refVideo) return {};
+    let roles = items.map(([, who], i) => `<Picture ${i + 1}> is ${who}.`).join(" ");
+    if (refVideo) roles += (roles ? " " : "") + "<Video 1> is the motion reference: " +
+      (items.length ? "the person performs the same dance moves, rhythm, body movement and camera framing as in <Video 1>, " +
+        "keeping the face, hair and outfit of the reference pictures." : "follow its movement, rhythm and camera framing.");
+    return { images: items.map(([d]) => d), roleNote: roles,
+             video: refVideo ? refVideo.data : null,
+             video_start: +$("#vidStart").value || 0, video_audio: $("#vidAudio").checked };
+  }
+  return {};
+}
+
+// Reference images: downscaled in the browser (long side ≤ 1536) and sent as data URLs.
+let refImages = [];
+function shrink(file) {
+  return new Promise((ok, bad) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 1536 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      ok(c.toDataURL("image/jpeg", 0.92));
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = bad;
+    img.src = URL.createObjectURL(file);
+  });
+}
+function renderRefs() {
+  const box = $("#refs");
+  box.querySelectorAll(".thumb").forEach(t => t.remove());
+  refImages.forEach((d, i) => {
+    const t = document.createElement("div"); t.className = "thumb";
+    t.innerHTML = `<img src="${d}"><button title="移除">×</button>`;
+    t.querySelector("button").onclick = () => { refImages.splice(i, 1); renderRefs(); updateEst(); };
+    box.insertBefore(t, box.querySelector(".addref"));
+
+  });
+  box.querySelectorAll(".addref").forEach(a => a.style.display = refImages.length >= 3 ? "none" : "");
+}
+$("#refFile").onchange = async e => {
+  for (const f of e.target.files) {
+    if (refImages.length >= 3) break;
+    try { refImages.push(await shrink(f)); } catch { $("#err").textContent = "讀不到這張圖"; }
+  }
+  e.target.value = ""; renderRefs(); updateEst();
+};
+
+async function updateEst() {
+  const secs = $("#seconds").value;
+  $("#secVal").textContent = secs;
+  const q = new URLSearchParams({ model, size, seconds: secs, steps: effSteps() });
+  const res = await fetch("/api/estimate?" + q);
+  if (!res.ok) return;           // a stale request from a half-switched form; the next one fills it
+  const e = await res.json();
+  let html = `<span>Token <b>${e.tokens.toLocaleString()}</b></span><span>粗估時間 <b>${fmt(e.eta_s)}</b></span>`;
+  if (model === "h3") html = `<span>實際長度 <b>${e.real_seconds} 秒</b>（${e.frames} 格）</span>` + html;
+  if (model === "qwen") html = `<span>模式 <b>${refImages.length ? "R2I（" + refImages.length + " 張參考圖）" : "T2I 文字生圖"}</b></span>` + html;
+  if (model === "h3" && vmode === "refs" && refVideo) html += `<span><b>＋動作影片</b>：時間約 ×3</span>`;
+  $("#est").innerHTML = html + `<span style="color:var(--muted)">依 M3 MacBook Air 實測起算，跑過幾個任務後會照你這台自動校正，僅供參考</span>`;
+}
+
+$("#model").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const old = model; model = b.dataset.v;
+  document.querySelectorAll("#model button").forEach(x => x.classList.toggle("on", x === b));
+  if ($("#prompt").value.trim() === "" || $("#prompt").value === PROMPTS[old]) $("#prompt").value = PROMPTS[model];
+  size = null; renderSizes(); updateEst();
+};
+$("#seconds").oninput = updateEst;
+
+$("#run").onclick = async () => {
+  $("#err").textContent = "";
+  const x = h3Extras();
+  if (model === "h3" && vmode === "frames" && !x.first && !x.last) { $("#err").textContent = "請放至少一張首幀或尾幀"; return; }
+  if (model === "h3" && vmode === "refs" && !x.images) { $("#err").textContent = "請放至少一張參考圖或一段影片"; return; }
+  if (x.video && engine !== "ref2va") { $("#err").textContent = "動作影片要用「正式 Ref2VA」"; return; }
+  if (model === "h3" && vmode === "refs" && x.images.length > REF_TOTAL) { $("#err").textContent = `參考圖最多 ${REF_TOTAL} 張，目前 ${x.images.length} 張`; return; }
+  const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
+  const body = { model, size, seconds: +$("#seconds").value, prompt,
+                 audio: model === "h3" ? $("#audioOn").checked : true,
+                 steps: effSteps(), accel, engine: engine === "ref2va" ? "ref2va" : "like", draft: isDraft(),
+                 bgm: model === "h3" && $("#audioOn").checked && $("#bgmOn").checked,
+                 seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
+                 images: model === "qwen" ? refImages : (x.images || []),
+                 first: x.first || null, last: x.last || null,
+                 video: x.video || null, video_start: x.video_start || 0, video_audio: !!x.video_audio };
+  const r = await fetch("/api/run", { method: "POST", body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) { $("#err").textContent = d.error; return; }
+  $("#err").style.color = "var(--ok)";
+  $("#err").textContent = d.state === "queued" && busyNow ? "已加入排隊" : "已開始";
+  setTimeout(() => { $("#err").textContent = ""; $("#err").style.color = ""; }, 4000);
+  poll();
+};
+$("#stop").onclick = async () => {
+  if (!confirm("確定要停止目前的任務？")) return;
+  await fetch("/api/stop", { method: "POST", body: "{}" });
+};
+
+let timer, busyNow = false;
+function renderQueue(q) {
+  $("#queueCard").hidden = !q.length;
+  $("#qCount").textContent = q.length ? `（${q.length} 個，全部約 ${fmt(q.reduce((a, x) => a + (x.eta_s || 0), 0))}）` : "";
+  const box = $("#qList"); box.innerHTML = "";
+  q.forEach((x, i) => {
+    const el = document.createElement("div"); el.className = "qi";
+    const what = x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}` : `Qwen ${x.width}×${x.height}`;
+    el.innerHTML = `<span class="qn">${i + 1}</span><b></b><span class="qp"></span><span>約 ${fmt(x.eta_s)}</span><button>取消</button>`;
+    el.querySelector("b").textContent = what;
+    el.querySelector(".qp").textContent = x.prompt;
+    el.querySelector("button").onclick = async () => {
+      await fetch("/api/cancel", { method: "POST", body: JSON.stringify({ id: x.id }) }); poll();
+    };
+    box.appendChild(el);
+  });
+}
+// One poll loop: a failed fetch (server restarting) retries instead of
+// stopping, and a call made while one is in flight just asks for another.
+let polling = false, pollAgain = false;
+async function poll() {
+  if (polling) { pollAgain = true; return; }
+  polling = true; clearTimeout(timer);
+  let next = 10000;
+  try { next = await pollOnce(); }
+  catch (e) { next = 5000; }
+  finally {
+    polling = false;
+    if (pollAgain) { pollAgain = false; next = 0; }
+    clearTimeout(timer); timer = setTimeout(poll, next);
+  }
+}
+async function pollOnce() {
+  const s = await (await fetch("/api/status")).json();
+  const j = s.job;
+  busyNow = s.busy;
+  $("#run").textContent = s.busy ? "加入排隊" : "開始生成";
+  renderQueue(s.queue || []);
+  if (j && s.busy) {
+    $("#statusCard").hidden = false;
+    $("#stTitle").textContent = `生成中：${j.model === "h3" ? "H3 影片" : "Qwen 圖片"} · ${j.width}×${j.height}` + (j.model === "h3" ? ` · ${j.real_seconds} 秒` : "");
+    $("#stBar").style.width = j.percent + "%";
+    $("#stStage").textContent = j.stage;
+    $("#stPct").textContent = j.percent + "%";
+    $("#stElapsed").textContent = fmt(j.elapsed_s);
+    $("#stEta").textContent = fmt(j.eta_s);
+    $("#stTok").textContent = j.tokens.toLocaleString();
+    $("#stLog").textContent = (j.log_tail || []).join("\n");
+    showPreview(j);
+  } else {
+    $("#statusCard").hidden = true;
+  }
+  loadHist();
+  return j && s.busy ? 3000 : 10000;
+}
+
+// Draft mode: small size of the same orientation, 3 s, 4 steps. Off restores the previous choice.
+let preDraft = null;
+function setSteps(n) {
+  steps = n;
+  stepHint();
+}
+$("#draftOn").onchange = () => {
+  if ($("#draftOn").checked) {
+    preDraft = { size, steps, seconds: $("#seconds").value };
+    const [w, h] = cfg.sizes.h3[size] || [16, 9];
+    size = w >= h ? "草稿 16:9" : "草稿 9:16";
+    $("#seconds").value = 3; setSteps(4);
+  } else if (preDraft) {
+    size = preDraft.size; $("#seconds").value = preDraft.seconds; setSteps(preDraft.steps);
+  }
+  renderSizes(); updateEst();
+};
+function isDraft() { return model === "h3" && size.startsWith("草稿"); }
+
+$("#tplSheet").onclick = () => {
+  $("#prompt").value = "Character reference sheet of one original fictional character, three panels side by side on a plain light grey background: " +
+    "left, full-body front view; middle, full-body back view; right, close-up of the head and face. " +
+    "The same person in every panel with identical hairstyle, outfit and colours. " +
+    "Describe the character here: age, hair, outfit, shoes, accessories. Soft even studio lighting, realistic photo.";
+  $("#prompt").focus();
+};
+
+// ---- Malaysian dialogue (Manglish / Malay / Malaysian Chinese) -------------
+// Lessons from MANGLISH-MALAY-VOICE-2026-11-06: say "English with a strong local
+// Malaysian accent" (never "Manglish"), spell out how sentence-end particles are
+// sung, and leave the sentence room to finish before the clip ends.
+const MY_PARTICLES = ["lah", "leh", "lor", "meh", "mah", "one", "wor", "liao", "hor", "ah"];
+const MALAY_WORDS = new Set(("jom kita saya awak kau aku dia kami mereka tak tidak nak mahu boleh dah sudah belum " +
+  "apa ini itu sini sana mana pergi makan minum sekarang nanti esok semalam terima kasih sedap betul cantik " +
+  "bagus tolong sikit banyak lagi juga dengan untuk dari ke di ada bukan ya okay jalan rumah kedai kawan " +
+  "abang kakak adik mak ayah cik encik puan selamat pagi petang malam datang balik beli murah mahal sama " +
+  "macam mana kenapa bila siapa semua lepas tu ni je lah kan pun nak kat").split(" "));
+const LANG_TAG = { 中: "Chinese", 馬: "Malay", 马: "Malay", 英: "Manglish" };
+
+function myLineLang(line) {
+  // manual override: 「中：」「馬：」「英：」 at the start of a line
+  const m = line.match(/^([中馬马英])[:：]\s*/);
+  if (m) return { lang: LANG_TAG[m[1]], text: line.slice(m[0].length) };
+  if (/[㐀-鿿]/.test(line)) return { lang: "Chinese", text: line };
+  const words = line.toLowerCase().match(/[a-z']+/g) || [];
+  const malay = words.filter(w => MALAY_WORDS.has(w)).length;
+  return { lang: words.length && malay / words.length >= 0.4 ? "Malay" : "Manglish", text: line };
+}
+function particleNote(text) {
+  const w = (text.toLowerCase().match(/[a-z]+(?=[^a-z]*$)/) || [""])[0].replace(/(.)\1+$/, "$1");
+  if (!MY_PARTICLES.includes(w)) return "";
+  return ` In the line "${text}", stretch the last word "${w}" into a long, sing-song, drawn-out ` +
+    `"${w.replace(/[aeiou]/, v => v.repeat(4))}" with a rising then falling tone.`;
+}
+const MY_ZH = { Chinese: "中文", Malay: "馬來語", Manglish: "Manglish" };
+const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// 「健身男：台詞」/ "the gym guy: line" -> speaker + spoken text; （猶豫半秒）-> acting note
+function splitSpeaker(line) {
+  let speaker = "", text = line;
+  const m = line.match(/^([^:：]{1,30})[:：]\s*(.+)$/);
+  if (m && !/^[中馬马英]$/.test(m[1].trim()) && !/^https?$/i.test(m[1].trim())) { speaker = m[1].trim(); text = m[2]; }
+  const acts = [];
+  text = text.replace(/[（(]([^）)]*)[）)]/g, (_, a) => { acts.push(a.trim()); return ""; }).replace(/\s+/g, " ").trim();
+  return { speaker, text, acts };
+}
+function sayPrefix(sp) {
+  if (!sp.speaker) return sp.acts.length ? `(${sp.acts.join(", ")}) ` : "";
+  return `${sp.speaker}${sp.acts.length ? ` (${sp.acts.join(", ")})` : ""} says: `;
+}
+const CLEAN_TEXT = "The lines are heard as speech only; the picture shows just the scene and the people.";
+const CLEAN_NOTE_FN = () => $("#wantSubs").checked ? "" : CLEAN_TEXT;
+
+function dialogueNote() {
+  if (model !== "h3") return "";
+  const lines = $("#dialogue").value.split("\n").map(x => x.trim()).filter(Boolean);
+  if (!lines.length) return "";
+  const lang = $("#dlgLang").value;
+  const head = "Dialogue, each line is spoken only once, in this order: ";
+  const sps = lines.map(splitSpeaker);
+  const named = sps.some(sp => sp.speaker);
+  const sep = named ? "\n" : " ";
+  if (lang !== "Manglish" && lang !== "MYmix") {
+    return head + sep + sps.map(sp => `${sayPrefix(sp)}<d>[${lang}] ${sp.text}</d>`).join(sep) + (CLEAN_NOTE_FN() ? "\n" + CLEAN_NOTE_FN() : "");
+  }
+  const parts = sps.map(sp => ({ ...(lang === "Manglish" ? { lang: "Manglish", text: sp.text.replace(/^[英][:：]\s*/, "") } : myLineLang(sp.text)), sp }));
+  const used = new Set(parts.map(p => p.lang));
+  const d = parts.map(p => `${sayPrefix(p.sp)}<d>[${p.lang === "Chinese" ? "Chinese" : p.lang === "Malay" ? "Malay" : "English"}] ${p.text}</d>`).join(sep);
+  const notes = [];
+  if (used.has("Manglish")) notes.push("The English lines are spoken in English with a strong local Malaysian accent, casual and natural, like a local Malaysian talking to a friend.");
+  if (used.has("Malay")) notes.push("The Malay lines are spoken in natural, casual Malaysian Malay.");
+  if (used.has("Chinese")) notes.push("The Chinese lines are spoken in Malaysian Mandarin with a local Malaysian Chinese accent; any English or Malay words inside them are said exactly as written.");
+  if (used.size > 1) notes.push("The speaker switches naturally between these languages, the way Malaysians do in everyday conversation.");
+  notes.push(parts.map(p => particleNote(p.text)).join("").trim());
+  notes.push("Every sentence is finished well before the clip ends.", CLEAN_NOTE_FN());
+  return head + sep + d + "\n" + notes.filter(Boolean).join(" ");
+}
+
+function syncMyDialogue() {
+  const lang = $("#dlgLang").value, my = lang === "Manglish" || lang === "MYmix";
+  const zh = lang === "Manglish" && $("#dialogue").value.split("\n").some(l => /[㐀-鿿]/.test(splitSpeaker(l).text));
+  $("#myHint").hidden = !zh;
+  $("#myHint").textContent = zh ? "⚠ 台詞還有中文字，Manglish 念不出來。改成英文，或按 ✨ AI 優化。" : "";
+  $("#myLines").hidden = lang !== "MYmix";
+  if (lang === "MYmix") {
+    const lines = $("#dialogue").value.split("\n").map(x => x.trim()).filter(Boolean);
+    $("#myLines").innerHTML = lines.length
+      ? lines.map(l => { const p = myLineLang(l); return `<b>${MY_ZH[p.lang]}</b>｜${escapeHtml(p.text)}`; }).join("<br>")
+      : "（輸入台詞後，這裡會顯示每行判斷成哪種語言）";
+  }
+}
+$("#dlgLang").addEventListener("change", syncMyDialogue);
+$("#dialogue").addEventListener("input", syncMyDialogue);
+syncMyDialogue();
+
+// ---- ✨ AI helper ------------------------------------------------------------
+let aiBefore = null;
+$("#aiGo").onclick = async () => {
+  if (model === "qwen") return aiImage();
+  const x = h3Extras();
+  const roles = [...(x.roleNote || "").matchAll(/<Picture \d+> is (.+?)\./g)].map(m => m[1]);
+  const body = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, lang: $("#dlgLang").value,
+                 seconds: +$("#seconds").value, size, bgm: $("#bgmOn").checked, audio: $("#audioOn").checked,
+                 images: x.images || [], roles };
+  $("#aiGo").disabled = true; $("#aiNote").hidden = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
+  try {
+    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "失敗");
+    aiBefore = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, seconds: $("#seconds").value };
+    $("#prompt").value = d.prompt;
+    const mix = $("#dlgLang").value === "MYmix";
+    $("#dialogue").value = (d.dialogue || []).map(l =>
+      `${l.speaker}: ${mix && l.lang === "Malay" ? "馬：" : ""}${l.text}`).join("\n");
+    $("#seconds").value = d.seconds;
+    $("#aiNote").innerHTML = "✨ " + escapeHtml(d.notes_zh || "改好了。") + "<br>改寫後的 prompt 和台詞都可以再手動修改。";
+    $("#aiNote").hidden = false; $("#aiUndo").hidden = false;
+    $("#aiStatus").textContent = `完成（${Math.round((Date.now() - t0) / 1000)} 秒）`;
+    syncMyDialogue(); updateEst();
+  } catch (e) {
+    $("#aiStatus").textContent = "⚠ " + e.message;
+  } finally {
+    clearInterval(tick); $("#aiGo").disabled = false;
+  }
+};
+// Qwen: rewrite the picture idea into a full photo prompt (the references go along so the AI sees them).
+async function aiImage() {
+  if (!$("#prompt").value.trim()) { $("#aiStatus").textContent = "⚠ 先在 Prompt 寫一點想法"; return; }
+  $("#aiGo").disabled = true; $("#aiNote").hidden = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
+  try {
+    const body = { mode: "image", prompt: $("#prompt").value, size, images: refImages || [] };
+    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "失敗");
+    aiBefore = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, seconds: $("#seconds").value };
+    $("#prompt").value = d.prompt;
+    $("#aiNote").innerHTML = "✨ " + escapeHtml(d.notes_zh || "改好了。") + "<br>改寫後的 prompt 可以再手動修改。";
+    $("#aiNote").hidden = false; $("#aiUndo").hidden = false;
+    $("#aiStatus").textContent = `完成（${Math.round((Date.now() - t0) / 1000)} 秒）`;
+    updateEst();
+  } catch (e) {
+    $("#aiStatus").textContent = "⚠ " + e.message;
+  } finally {
+    clearInterval(tick); $("#aiGo").disabled = false;
+  }
+}
+$("#aiUndo").onclick = () => {
+  if (!aiBefore) return;
+  $("#prompt").value = aiBefore.prompt; $("#dialogue").value = aiBefore.dialogue; $("#seconds").value = aiBefore.seconds;
+  aiBefore = null; $("#aiUndo").hidden = true; $("#aiNote").hidden = true; $("#aiStatus").textContent = "已還原";
+  syncMyDialogue(); updateEst();
+};
+
+// ---- Reference library ----------------------------------------------------
+const CAT_ZH = { person: "人物", scene: "場景", object: "物品" };
+let lib = [], libTab = "person", lastLib = "";
+async function toDataURL(url) {
+  const b = await (await fetch(url)).blob();
+  return await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+}
+async function loadLib(force) {
+  const items = await (await fetch("/api/library")).json();
+  const sig = JSON.stringify(items.map(x => x.id + x.name + x.category));
+  if (!force && sig === lastLib) return;
+  lastLib = sig; lib = items; renderLib();
+}
+function renderLib() {
+  for (const c of Object.keys(CAT_ZH)) $("#libN-" + c).textContent = lib.filter(x => x.category === c).length || "";
+  document.querySelectorAll("#libTabs button").forEach(b => b.classList.toggle("on", b.dataset.v === libTab));
+  const box = $("#libGrid"); box.innerHTML = "";
+  const items = lib.filter(x => x.category === libTab).slice().reverse();
+  if (!items.length) { box.innerHTML = `<div class="libempty">還沒有${CAT_ZH[libTab]}參考圖。</div>`; return; }
+  for (const it of items) {
+    const el = document.createElement("div"); el.className = "libitem";
+    el.innerHTML = `<img src="/files/${it.file}"><div class="ln"></div><div class="lb">
+      <button data-a="video">用於影片</button><button data-a="image">用於圖片</button><button data-a="first">首幀</button>
+      <button data-a="rename">改名</button>
+      <select data-a="move">${Object.entries(CAT_ZH).map(([k, v]) => `<option value="${k}"${k === it.category ? " selected" : ""}>${v}</option>`).join("")}</select>
+      <button data-a="del" class="dz">刪除</button></div>`;
+    el.querySelector(".ln").textContent = it.name;
+    el.querySelector(".ln").title = it.name;
+    el.querySelectorAll("[data-a]").forEach(b => {
+      const a = b.dataset.a;
+      if (a === "move") { b.onchange = () => libAction("move", it, { category: b.value }); return; }
+      b.onclick = () => useLib(a, it);
+    });
+    box.appendChild(el);
+  }
+}
+$("#libTabs").onclick = e => { const b = e.target.closest("button"); if (!b) return; libTab = b.dataset.v; renderLib(); };
+async function libAction(action, it, extra) {
+  const r = await fetch("/api/library/" + action, { method: "POST", body: JSON.stringify({ id: it.id, ...extra }) });
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || "失敗"); return; }
+  loadLib(true);
+}
+function selectModel(m) {
+  if (model === m) return;
+  document.querySelector(`#model button[data-v="${m}"]`).click();
+}
+function selectVmode(v) {
+  if (vmode === v) return;
+  document.querySelector(`#vmode button[data-v="${v}"]`).click();
+}
+async function useLib(a, it) {
+  if (a === "rename") {
+    const n = prompt("新名稱", it.name); if (n !== null && n.trim()) libAction("rename", it, { name: n.trim() }); return;
+  }
+  if (a === "del") {
+    if (confirm(`刪除參考圖「${it.name}」？會移到垃圾桶。`)) libAction("delete", it); return;
+  }
+  const d = await toDataURL("/files/" + it.file);
+  if (a === "video") {
+    selectModel("h3"); selectVmode("refs");
+    const g = it.category;
+    if (refSets[g].length >= REF_LIMIT[g]) return alert(`${CAT_ZH[g]}最多 ${REF_LIMIT[g]} 張`);
+    if (refTotal() >= REF_TOTAL) return alert(`參考圖最多 ${REF_TOTAL} 張`);
+    refSets[g].push(d); renderRefGroups();
+  } else if (a === "image") {
+    selectModel("qwen");
+    if (refImages.length >= 3) return alert("圖片參考圖最多 3 張");
+    refImages.push(d); renderRefs();
+  } else if (a === "first") {
+    selectModel("h3"); selectVmode("frames");
+    slotImg.first = d; renderSlots();
+  }
+  updateEst();
+  $("#form").scrollIntoView({ behavior: "smooth" });
+}
+// modal picker used by the "從圖庫選" tiles
+let pickerCb = null;
+function openPicker(cat, cb) {
+  pickerCb = cb;
+  $("#pickerTitle").textContent = cat ? `從圖庫選${CAT_ZH[cat]}` : "從圖庫選";
+  const box = $("#pickerGrid"); box.innerHTML = "";
+  const items = lib.filter(x => !cat || x.category === cat).slice().reverse();
+  if (!items.length) box.innerHTML = `<div class="libempty">圖庫裡還沒有${cat ? CAT_ZH[cat] : ""}參考圖。先在歷史紀錄按「存為參考」。</div>`;
+  for (const it of items) {
+    const el = document.createElement("div"); el.className = "libitem pick";
+    el.innerHTML = `<img src="/files/${it.file}"><div class="ln"></div><div class="lb" style="color:var(--muted);font-size:11px">${CAT_ZH[it.category]}</div>`;
+    el.querySelector(".ln").textContent = it.name;
+    el.onclick = async () => { const d = await toDataURL("/files/" + it.file); $("#picker").hidden = true; pickerCb && pickerCb(d); };
+    box.appendChild(el);
+  }
+  $("#picker").hidden = false;
+}
+$("#pickerClose").onclick = () => { $("#picker").hidden = true; };
+$("#picker").onclick = e => { if (e.target.id === "picker") $("#picker").hidden = true; };
+$("#qLib").onclick = () => openPicker(null, d => { if (refImages.length < 3) { refImages.push(d); renderRefs(); updateEst(); } });
+
+// "save as reference" form under a history item; frame = data URL grabbed from a video
+function saveForm(j, getImage) {
+  const f = document.createElement("div"); f.className = "savebox";
+  f.innerHTML = `<select>${Object.entries(CAT_ZH).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
+    <input placeholder="名稱，例如 小美、客廳、拿鐵杯"><button>存</button><button>取消</button>`;
+  const [sel, inp] = [f.querySelector("select"), f.querySelector("input")];
+  const [ok, cancel] = f.querySelectorAll("button");
+  cancel.onclick = () => f.remove();
+  ok.onclick = async () => {
+    const body = { category: sel.value, name: inp.value.trim(), from_job: j.id };
+    const img = getImage ? getImage() : null;
+    if (img) body.image = img; else body.job_id = j.id;
+    const r = await fetch("/api/library/add", { method: "POST", body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || "儲存失敗"); return; }
+    f.innerHTML = `<span style="color:var(--ok);font-size:12px">已存到「${CAT_ZH[d.category]}」：${d.name}</span>`;
+    libTab = d.category; loadLib(true);
+  };
+  setTimeout(() => inp.focus(), 0);
+  return f;
+}
+function grabFrame(video) {
+  const c = document.createElement("canvas");
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext("2d").drawImage(video, 0, 0);
+  return c.toDataURL("image/png");
+}
+
+// "@" in the prompt: list the references currently placed, with thumbnails.
+function mentionItems() {
+  const out = [];
+  if (model === "h3" && vmode === "refs") {
+    refSets.person.forEach((d, i) => out.push({ zh: refSets.person.length > 1 ? `人物 ${i + 1}` : "人物", text: refSets.person.length > 1 ? `person ${i + 1}` : "the person", img: d }));
+    refSets.scene.forEach(d => out.push({ zh: "場景", text: "the scene", img: d }));
+    refSets.object.forEach((d, i) => out.push({ zh: refSets.object.length > 1 ? `物品 ${i + 1}` : "物品", text: refSets.object.length > 1 ? `object ${i + 1}` : "the object", img: d }));
+  } else if (model === "h3" && vmode === "frames") {
+    if (slotImg.first) out.push({ zh: "首幀", text: "the first frame", img: slotImg.first });
+    if (slotImg.last) out.push({ zh: "尾幀", text: "the last frame", img: slotImg.last });
+  } else if (model === "qwen") {
+    refImages.forEach((d, i) => out.push({ zh: `參考圖 ${i + 1}`, text: `Picture ${i + 1}`, img: d }));
+  }
+  return out;
+}
+let mState = null;   // {start, items, sel}
+function mentionQuery() {
+  const ta = $("#prompt"), pos = ta.selectionStart, before = ta.value.slice(0, pos);
+  const m = before.match(/@([^\s@]*)$/);
+  return m ? { start: pos - m[0].length, q: m[1].toLowerCase() } : null;
+}
+function closeMention() { mState = null; $("#mention").hidden = true; }
+function openMention() {
+  const mq = mentionQuery();
+  if (!mq) return closeMention();
+  const all = mentionItems();
+  const items = all.filter(it => !mq.q || it.text.toLowerCase().includes(mq.q) || it.zh.includes(mq.q));
+  const box = $("#mention"); box.innerHTML = ""; box.hidden = false;
+  if (!all.length) {
+    box.innerHTML = '<div class="mnone">還沒有放參考圖。影片：在「畫面控制」選參考圖或首尾幀；圖片：在「參考圖」加入圖片。</div>';
+    mState = { start: mq.start, items: [], sel: 0 }; return;
+  }
+  if (!items.length) { box.innerHTML = '<div class="mnone">沒有符合的參考圖</div>'; mState = { start: mq.start, items: [], sel: 0 }; return; }
+  const sel = mState && mState.sel < items.length ? mState.sel : 0;
+  mState = { start: mq.start, items, sel };
+  items.forEach((it, i) => {
+    const el = document.createElement("div"); el.className = "mi" + (i === sel ? " on" : "");
+    el.innerHTML = `<img src="${it.img}"><span></span><small></small>`;
+    el.querySelector("span").textContent = it.zh;
+    el.querySelector("small").textContent = it.text;
+    el.onmousedown = ev => { ev.preventDefault(); pickMention(i); };
+    box.appendChild(el);
+  });
+}
+function pickMention(i) {
+  if (!mState || !mState.items[i]) return closeMention();
+  const ta = $("#prompt"), it = mState.items[i];
+  const end = ta.selectionStart;
+  ta.value = ta.value.slice(0, mState.start) + it.text + " " + ta.value.slice(end);
+  const caret = mState.start + it.text.length + 1;
+  ta.setSelectionRange(caret, caret); ta.focus();
+  closeMention();
+}
+$("#prompt").addEventListener("input", openMention);
+$("#prompt").addEventListener("click", openMention);
+$("#prompt").addEventListener("blur", () => setTimeout(closeMention, 120));
+$("#prompt").addEventListener("keydown", e => {
+  if (!mState || $("#mention").hidden || !mState.items.length) { if (e.key === "Escape") closeMention(); return; }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = mState.items.length;
+    mState.sel = (mState.sel + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    openMention();
+  } else if (e.key === "Enter" || e.key === "Tab") {
+    e.preventDefault(); pickMention(mState.sel);
+  } else if (e.key === "Escape") { e.preventDefault(); closeMention(); }
+});
+
+let lastPv = "";
+function showPreview(j) {
+  const p = j.preview, box = $("#pv");
+  if (!p) {
+    if (lastPv) { lastPv = ""; box.innerHTML = '<div class="pvwait">等第一步完成就會出現預覽</div>'; }
+    return;
+  }
+  if (p.url === lastPv) return;
+  lastPv = p.url;
+  const tag = `<span class="pvtag">預覽 · 第 ${p.step ?? "?"} 步（低解析度草稿）</span>`;
+  box.innerHTML = p.kind === "video"
+    ? `<video src="${p.url}" autoplay loop muted playsinline></video>${tag}`
+    : `<img src="${p.url}">${tag}`;
+}
+
+// Seed: random, typed, or picked from a past job (matching history cards light up green).
+function markSeed() {
+  const on = $("#seedSel").value !== "random", v = $("#seed").value.trim();
+  $("#seedBox").hidden = !on;
+  document.querySelectorAll("#hist .item").forEach(el => el.classList.toggle("seedhit", on && v !== "" && el.dataset.seed === v));
+}
+$("#seedSel").onchange = () => {
+  const v = $("#seedSel").value;
+  if (/^\d+$/.test(v)) $("#seed").value = v;
+  else if (v === "random") $("#seed").value = "";
+  markSeed();
+  const hit = document.querySelector("#hist .item.seedhit");
+  if (hit && $("#histCard").classList.contains("folded")) $("#histCard .fold").click();
+  if (hit) hit.scrollIntoView({ behavior: "smooth", block: "nearest" });
+};
+$("#seed").oninput = markSeed;
+function fillSeedOptions(jobs) {
+  const sel = $("#seedSel"), keep = sel.value, seen = new Set();
+  const opts = ['<option value="random">隨機生成</option>', '<option value="custom">自己輸入號碼</option>'];
+  for (const j of jobs) {
+    if (j.state !== "done" || seen.has(j.seed)) continue;
+    seen.add(j.seed);
+    const t = (j.prompt || "").replace(/\s+/g, " ").slice(0, 26);
+    opts.push(`<option value="${j.seed}">seed ${j.seed} · ${j.model === "h3" ? "影片" : "圖片"} · ${escapeHtml(t)}…</option>`);
+  }
+  sel.innerHTML = opts.join("");
+  sel.value = [...sel.options].some(o => o.value === keep) ? keep : "random";
+}
+
+let lastHist = "";
+async function loadHist() {
+  const jobs = await (await fetch("/api/jobs")).json();
+  const sig = JSON.stringify(jobs.map(j => j.id + j.state));
+  if (sig === lastHist) return; lastHist = sig;
+  const box = $("#hist");
+  if (!jobs.length) { box.innerHTML = '<div class="empty">還沒有生成過。</div>'; return; }
+  box.innerHTML = "";
+  const names = { done: "完成", failed: "失敗", stopped: "已停止", running: "生成中", queued: "排隊中",
+                  cancelled: "已取消", interrupted: "中斷" };
+  for (const j of jobs) {
+    if (j.state === "queued") continue;   // shown in the queue card instead
+    const el = document.createElement("div"); el.className = "item"; el.dataset.seed = String(j.seed);
+    const src = "/files/" + j.output;
+    let media = "";
+    if (j.state === "done") media = j.model === "h3"
+      ? `<video src="${src}" controls preload="metadata"></video>` : `<a href="${src}" target="_blank"><img src="${src}"></a>`;
+    const len = j.model === "h3"
+      ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.steps ? ` · ${j.steps} 步 · ${({turbo: "Turbo", pika: "Pika", none: "不加速"})[j.accel] || (j.turbo === false ? "不加速" : "Turbo")}` : "")
+        + (j.engine === "ref2va" ? " · Ref2VA" : "")
+        + (j.audio === false ? " · 無聲" : j.bgm ? " · 有配樂" : "") : "";
+    el.innerHTML = `${media}<div class="meta"><p></p>
+      <span class="tag ${j.state}">${names[j.state] || j.state}</span>
+      ${j.model === "h3" ? "H3" : "Qwen"} · ${j.width}×${j.height}${len} · ${j.tokens.toLocaleString()} token
+      <br>${j.id} · 用時 ${fmt(j.elapsed_s)} · <span class="seedtag">seed ${j.seed}</span></div>`;
+    el.querySelector("p").textContent = j.prompt;
+    const conds = [...(j.first ? [["首", j.first]] : []), ...(j.last ? [["尾", j.last]] : []),
+                   ...(j.refs || []).map((r, i) => ["參" + (i + 1), r])];
+    if (conds.length) {
+      const rl = document.createElement("div"); rl.className = "reflist";
+      rl.innerHTML = "輸入：" + conds.map(([t, r]) => `<img title="${t}" src="/files/${r}">`).join("");
+      el.querySelector(".meta").appendChild(rl);
+    }
+    if (j.state === "done") {
+      const sb = document.createElement("button"); sb.className = "savebtn";
+      if (j.model === "qwen") {
+        sb.textContent = "存為參考";
+        sb.onclick = () => { if (!el.querySelector(".savebox")) el.querySelector(".meta").appendChild(saveForm(j, null)); };
+      } else {
+        sb.textContent = "存目前畫面為參考";
+        sb.title = "先把影片暫停在想要的畫面，再按這裡";
+        sb.onclick = () => {
+          const v = el.querySelector("video");
+          if (!v || !v.videoWidth) return alert("影片還沒載入，先播放一下再試");
+          v.pause();
+          const frame = grabFrame(v);
+          if (!el.querySelector(".savebox")) el.querySelector(".meta").appendChild(saveForm(j, () => frame));
+        };
+      }
+      el.querySelector(".meta").appendChild(sb);
+    }
+    if (j.state !== "running") {
+      const del = document.createElement("button");
+      del.className = "delbtn"; del.textContent = "刪除";
+      del.onclick = async () => {
+        if (!confirm(`刪除這筆紀錄（${j.id}）？\n檔案會移到垃圾桶，清空垃圾桶前都還能救回來。`)) return;
+        const r = await fetch("/api/delete", { method: "POST", body: JSON.stringify({ id: j.id }) });
+        const d = await r.json();
+        if (!r.ok) { alert(d.error || "刪除失敗"); return; }
+        lastHist = ""; loadHist();
+      };
+      el.querySelector(".meta").appendChild(del);
+    }
+    box.appendChild(el);
+  }
+  fillSeedOptions(jobs); markSeed();
+}
+
+// Fold the library / history cards; remembered per browser.
+document.querySelectorAll(".fold").forEach(b => {
+  const card = document.getElementById(b.dataset.fold), key = "fold-" + b.dataset.fold;
+  const set = f => { card.classList.toggle("folded", f); b.textContent = f ? "展開" : "收起";
+                     try { localStorage.setItem(key, f ? "1" : ""); } catch {} };
+  let f0 = false; try { f0 = localStorage.getItem(key) === "1"; } catch {}
+  set(f0);
+  b.onclick = () => set(!card.classList.contains("folded"));
+});
+
+(async () => {
+  cfg = await (await fetch("/api/config")).json();
+  $("#prompt").value = PROMPTS.h3;
+  applyAvail(); renderSizes(); renderSlots(); updateEst(); poll(); loadLib(true);
+})();
+</script>
+</body>
+</html>
