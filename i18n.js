@@ -8,6 +8,7 @@ try { LANG = localStorage.getItem("vpipe-lang") || (navigator.language.startsWit
 
 const EN = {
   // header / form
+  "vpipe工作台": "vpipe Workbench",
   "在這台 Mac 本機生成 · 可排隊，一次跑一個 · 結果存在 ~/vpipe-work/jobs/": "Generated locally on this Mac · jobs queue up, one runs at a time · results are saved in ~/vpipe-work/jobs/",
   "影片＋聲音": "video + sound", "圖片": "image", "影片": "video",
   "畫面設定": "Picture", "草稿模式": "Draft mode", "大小": "Size", "加速": "Speed-up", "不加速": "None",
@@ -183,6 +184,7 @@ function setLang(l) {
   LANG = l;
   try { localStorage.setItem("vpipe-lang", l); } catch (e) {}
   document.documentElement.lang = l === "en" ? "en" : "zh-Hant";
+  document.title = l === "en" ? "vpipe Workbench" : "vpipe工作台";
   trBusy = true;
   try { trNode(document.body); } finally { trBusy = false; }
   document.querySelectorAll("#langSw button").forEach(b => b.classList.toggle("on", b.dataset.l === l));
