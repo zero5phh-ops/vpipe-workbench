@@ -1,0 +1,29 @@
+{
+  "id": "prepare-previews",
+  "stages": [
+    {
+      "id": "fetch-taeh3",
+      "type": "model-fetch",
+      "config": {
+        "model_path": "madebyollin/taehv",
+        "hf_token": "",
+        "base_path": "./models",
+        "skip_existing_files": true,
+        "overwrite_existing": false,
+        "model_variant": "madebyollin/taeh3"
+      }
+    },
+    {
+      "id": "fetch-taeqi",
+      "type": "model-fetch",
+      "config": {
+        "model_path": "madebyollin/taeqi2_1",
+        "hf_token": "",
+        "base_path": "./models",
+        "skip_existing_files": true,
+        "overwrite_existing": false
+      }
+    }
+  ],
+  "subpipelines": []
+}

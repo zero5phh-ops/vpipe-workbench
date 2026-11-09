@@ -181,12 +181,46 @@
   .refgroup .slots { margin-top: 6px; }
   .item .reflist { display: flex; gap: 4px; margin-top: 6px; }
   .item .reflist img { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; background: none; }
+  .top { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+  .topact { display: flex; gap: 8px; align-items: center; }
+  #langSw button { padding: 4px 10px; font-size: 12px; }
+  .setup { border: 1px solid var(--line); }
+  .setup .sum { font-size: 13px; color: var(--muted); margin: 2px 0 12px; }
+  .setup .sum b.ok { color: var(--ok); } .setup .sum b.bad { color: var(--bad); }
+  .si { display: grid; grid-template-columns: 26px 1fr auto; gap: 4px 10px; align-items: start;
+        padding: 12px 0; border-top: 1px solid var(--line); }
+  .si .ic { font-size: 16px; line-height: 22px; text-align: center; }
+  .si .ic.ok { color: var(--ok); } .si .ic.bad { color: var(--bad); } .si .ic.opt { color: var(--muted); }
+  .si .nm { font-weight: 600; font-size: 14px; }
+  .si .nm small { font-weight: 400; color: var(--muted); margin-left: 6px; font-size: 12px; }
+  .si .ds { grid-column: 2 / 4; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .si .ds code { background: var(--bg); padding: 2px 6px; border-radius: 6px; color: var(--ink); font-size: 12px;
+                 user-select: all; }
+  .si .act { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .si .act .mini { margin-left: 0; }
+  .si .act .go1 { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); text-decoration: none; }
+  .si .act .mini:disabled { opacity: .35; cursor: not-allowed; }
+  .si .prog { grid-column: 2 / 4; }
+  .si .prog .bar { margin: 6px 0 2px; }
+  .setup .foot { display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap;
+                 border-top: 1px solid var(--line); padding-top: 12px; font-size: 12px; color: var(--muted); }
+  .setup .foot a { color: inherit; }
 </style>
 </head>
 <body>
 <main>
-  <h1>vpipe工作台</h1>
-  <p class="sub">在這台 Mac 本機生成 · 可排隊，一次跑一個 · 結果存在 ~/vpipe-work/jobs/</p>
+  <div class="top">
+    <div>
+      <h1>vpipe工作台</h1>
+      <p class="sub">在這台 Mac 本機生成 · 可排隊，一次跑一個 · 結果存在 ~/vpipe-work/jobs/</p>
+    </div>
+    <div class="topact">
+      <button class="mini" id="setupBtn">⚙ 設定檢查</button>
+      <div class="seg" id="langSw"><button data-l="zh">中文</button><button data-l="en">EN</button></div>
+    </div>
+  </div>
+
+  <section class="card setup" id="setupCard" hidden></section>
 
   <div class="cols">
   <div class="col-left">
@@ -348,6 +382,7 @@
   </div>
 </main>
 
+<script src="/i18n.js"></script>
 <script>
 // Every POST is JSON: the server refuses anything else (blocks other websites).
 {
@@ -877,7 +912,7 @@ $("#aiGo").onclick = async () => {
   const t0 = Date.now();
   const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
   try {
-    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify(body) });
+    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify({ ...body, ui_lang: LANG }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "失敗");
     aiBefore = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, seconds: $("#seconds").value };
@@ -904,7 +939,7 @@ async function aiImage() {
   const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
   try {
     const body = { mode: "image", prompt: $("#prompt").value, size, images: refImages || [] };
-    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify(body) });
+    const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify({ ...body, ui_lang: LANG }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "失敗");
     aiBefore = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, seconds: $("#seconds").value };
@@ -1241,7 +1276,121 @@ document.querySelectorAll(".fold").forEach(b => {
   b.onclick = () => set(!card.classList.contains("folded"));
 });
 
+// ---- ⚙ Setup check: vpipe, ffmpeg, models, Codex -------------------------------
+// Opens by itself the first time, and whenever something required is missing.
+const L = (zh, en) => (LANG === "en" ? en : zh);
+const SETUP_TEXT = {
+  vpipe: () => [L("vpipe 引擎", "vpipe engine"),
+    L("跑模型的程式。打開下載頁，下載 <b>with-ffmpeg</b> 的 .dmg，把 Vpipe Manager 拖到「應用程式」，打開它一次，再按「重新檢查」。",
+      "The program that runs the models. Open the download page, get the <b>with-ffmpeg</b> .dmg, drag Vpipe Manager to Applications, open it once, then press Re-check.")],
+  ffmpeg: () => [L("ffmpeg", "ffmpeg"),
+    L("處理參考圖和影片預覽用。在「終端機」執行下面的指令（沒有 Homebrew 的話先到 <a href='https://brew.sh' target='_blank'>brew.sh</a> 安裝）：",
+      "Used for reference images and video previews. Run this in Terminal (no Homebrew? install it from <a href='https://brew.sh' target='_blank'>brew.sh</a> first):")],
+  qwen: it => [L("Qwen Image 2.1 Turbo（圖片）", "Qwen Image 2.1 Turbo (images)"),
+    L(`按「下載安裝」從 Hugging Face 下載，約 ${it.final_gb} GB。`, `Press Install to download it from Hugging Face, about ${it.final_gb} GB.`)],
+  h3: it => [L("MiniMax H3（影片＋聲音）", "MiniMax H3 (video + sound)"),
+    L(`下載約 115 GB 後壓成 8-bit，最後佔 ${it.final_gb} GB；過程中需要約 ${it.need_gb} GB 空間，要跑好幾個小時。`,
+      `Downloads about 115 GB and compresses it to 8-bit, ending at ${it.final_gb} GB. It needs about ${it.need_gb} GB free while it works and takes several hours.`)],
+  turbo: () => [L("H3 Turbo 加速（建議）", "H3 Turbo speed-up (recommended)"),
+    L("讓 H3 只要 4–8 步就有乾淨的畫面，約 1 GB。", "Lets H3 look clean in 4–8 steps. About 1 GB.")],
+  previews: () => [L("即時預覽（建議）", "Live previews (recommended)"),
+    L("生成時看到每一步的低解析度草稿，很小。", "Shows a low-res draft after every step while generating. Tiny.")],
+  codex: () => [L("Codex CLI（✨ AI 優化用，選用）", "Codex CLI (for ✨ AI enhance, optional)"),
+    L("裝了 ChatGPT 桌面版就已經有了；不然在「終端機」執行：", "Included with the ChatGPT desktop app; otherwise run this in Terminal:")],
+  codex_login: it => [L("登入 ChatGPT（✨ AI 優化用）", "Sign in to ChatGPT (for ✨ AI enhance)"),
+    it.blocked ? L("先安裝上面的 Codex CLI。", "Install the Codex CLI above first.")
+               : L("用你的 ChatGPT 帳號登入 Codex。按「登入」會打開瀏覽器，登入完回來按「重新檢查」。",
+                   "Sign Codex in with your ChatGPT account. Login opens the browser; come back and press Re-check when done.")],
+};
+let setupData = null, setupTimer = null, setupLastErr = null;
+async function loadSetup(show) {
+  try { setupData = await (await fetch("/api/setup")).json(); } catch (e) { return; }
+  let seen = false; try { seen = localStorage.getItem("vpipe-setup-seen") === "1"; } catch (e) {}
+  if (show || !setupData.ready || !seen) $("#setupCard").hidden = false;
+  renderSetup();
+  clearTimeout(setupTimer);
+  if (setupData.task && setupData.task.id) setupTimer = setTimeout(() => loadSetup(false), 3000);
+  else if (setupData.task && setupData.task.done && setupData.task.done.length && cfg) {
+    cfg = await (await fetch("/api/config")).json();   // newly installed models become selectable
+    applyAvail();
+  }
+}
+function renderSetup() {
+  const d = setupData; if (!d) return;
+  const box = $("#setupCard"), t = d.task || {};
+  const rows = d.items.map(it => {
+    const [name, desc] = SETUP_TEXT[it.id](it);
+    const tag = it.required ? L("必要", "required") : L("選用", "optional");
+    const ic = it.ok ? '<span class="ic ok">✓</span>' : it.required ? '<span class="ic bad">✗</span>' : '<span class="ic opt">○</span>';
+    let act = "", extra = "";
+    if (!it.ok) {
+      if (it.action === "link") act = `<a class="mini go1" href="${it.url}" target="_blank" rel="noopener">${L("打開下載頁", "Open download page")}</a>`;
+      if (it.action === "command") {
+        extra = `<br><code>${it.command}</code>` + (it.alt_command ? ` ${L("或", "or")} <code>${it.alt_command}</code>` : "");
+        act = `<button class="mini" data-copy="${it.command}">${L("複製指令", "Copy command")}</button>`;
+      }
+      if (it.action === "install") {
+        const busy = t.id === it.id;
+        act = busy ? `<button class="mini" data-stop="1">${L("停止安裝", "Stop install")}</button>`
+                   : `<button class="mini go1" data-install="${it.id}" ${t.id || !d.items[0].ok ? "disabled" : ""}>${L("下載安裝", "Install")}</button>`;
+      }
+      if (it.action === "login" && !it.blocked) act = `<button class="mini go1" data-login="1">${L("登入", "Login")}</button>`;
+    } else if (it.path) extra = `<br><small>${escapeHtml(it.path)}</small>`;
+    let prog = "";
+    if (t.id === it.id) prog = `<div class="prog"><div class="bar"><div style="width:${t.percent || 0}%"></div></div>
+      <small>${L("安裝中", "Installing")}… ${t.percent || 0}%${t.stage ? " · " + escapeHtml(t.stage) : ""}</small></div>`;
+    else if (t.error && !t.id && setupLastErr === it.id) prog = `<div class="prog"><small style="color:var(--bad)">${L("安裝沒有完成", "Install did not finish")}: ${escapeHtml(t.error)} · ${escapeHtml(d.work)}/setup/${it.id}.log</small></div>`;
+    return `<div class="si">${ic}<div class="nm">${name}<small>${tag}</small></div><div class="act">${act}</div>
+      <div class="ds">${it.ok ? L("已安裝", "Installed") : desc}${extra}</div>${prog}</div>`;
+  }).join("");
+  const sum = d.ready ? `<b class="ok">${L("可以開始用了", "Ready to go")}</b>` : `<b class="bad">${L("還缺必要的項目", "Something required is missing")}</b>`;
+  box.innerHTML = `<div class="cardhead"><label class="h">${L("⚙ 設定檢查", "⚙ Setup check")}</label>
+      <span><button class="mini" id="setupRe">${L("重新檢查", "Re-check")}</button><button class="mini" id="setupClose">${L("關閉", "Close")}</button></span></div>
+    <div class="sum">${sum} · ${L("至少要有 vpipe、ffmpeg 和其中一個模型", "You need vpipe, ffmpeg and at least one model")} · ${L("磁碟剩", "Free disk")} ${d.free_gb} GB</div>
+    ${rows}
+    <div class="foot"><span>${L("模型下載自 Hugging Face，下載即表示你同意各模型的授權條款。", "Models download from Hugging Face; downloading means you accept each model's license.")}
+      <a href="https://github.com/zero5phh-ops/vpipe-workbench#授權-license" target="_blank" rel="noopener">${L("看授權", "Licenses")}</a></span></div>`;
+}
+$("#setupCard").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "setupRe") return loadSetup(true);
+  if (b.id === "setupClose") {
+    $("#setupCard").hidden = true;
+    try { localStorage.setItem("vpipe-setup-seen", "1"); } catch (e) {}
+    return;
+  }
+  if (b.dataset.copy) {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = L("已複製", "Copied"); }
+    catch (err) { prompt(L("複製這行指令：", "Copy this command:"), b.dataset.copy); }
+    return;
+  }
+  const call = async (url, body) => {
+    const r = await fetch(url, { method: "POST", body: JSON.stringify(body || {}) });
+    const d = await r.json();
+    if (!r.ok) alert(d.error || "失敗");
+    return r.ok;
+  };
+  if (b.dataset.install) {
+    const it = setupData.items.find(x => x.id === b.dataset.install);
+    if (it.id === "h3" && !confirm(L(`H3 要下載約 115 GB、需要約 ${it.need_gb} GB 空間，跑好幾個小時。現在開始？`,
+                                     `H3 downloads about 115 GB, needs about ${it.need_gb} GB free and takes several hours. Start now?`))) return;
+    setupLastErr = it.id;
+    if (await call("/api/setup/install", { id: it.id })) loadSetup(true);
+  }
+  if (b.dataset.stop && confirm(L("停止安裝？已下載的部分會保留，下次會接著下載。", "Stop the install? What's downloaded is kept and resumes next time."))) {
+    await call("/api/setup/stop"); setTimeout(() => loadSetup(true), 1500);
+  }
+  if (b.dataset.login && await call("/api/setup/codex-login")) {
+    b.textContent = L("已打開瀏覽器…", "Browser opened…");
+    setTimeout(() => loadSetup(true), 15000);
+  }
+});
+$("#setupBtn").onclick = () => loadSetup(true);
+$("#langSw").onclick = e => { const b = e.target.closest("button"); if (b) { setLang(b.dataset.l); renderSetup(); } };
+
 (async () => {
+  setLang(LANG);
+  loadSetup(false);
   cfg = await (await fetch("/api/config")).json();
   $("#prompt").value = PROMPTS.h3;
   applyAvail(); renderSizes(); renderSlots(); updateEst(); poll(); loadLib(true);

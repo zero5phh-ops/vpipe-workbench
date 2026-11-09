@@ -734,6 +734,8 @@ def _run_one(job, pipeline_path):
 
 
 def start_job(body):
+    if setup_task["proc"] is not None:
+        raise ValueError("正在安裝模型，裝好後再生成")
     model = body.get("model")
     if model not in SIZES:
         raise ValueError("未知的模型")
@@ -1161,6 +1163,8 @@ def assist(body):
                              "; ".join(f"Picture {i + 1} = {r}" for i, r in enumerate(roles)))
             else:
                 lines.append("No reference pictures: describe every person in words.")
+        if body.get("ui_lang") == "en":
+            lines.append("The user reads English: write notes_zh in English, not Chinese.")
         cmd = [str(CODEX), "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
                "-C", str(tmp), "-c", 'model_reasoning_effort="low"',
                "--output-schema", str(tmp / "schema.json"), "-o", str(tmp / "out.json")]
@@ -1184,6 +1188,142 @@ def assist(body):
     if not image_mode:
         ans["seconds"] = max(1, min(10, int(ans.get("seconds") or 3)))
     return ans
+
+
+# ---- First-run setup: what is installed, and one-click model downloads -------
+VPIPE_RELEASES = "https://github.com/tgo-app-dev/vpipe/releases/latest"
+SETUP_MODELS = {
+    # id: (install pipeline, peak disk GB, final GB, required-for)
+    "qwen":     ("prepare-qwen-image-2.1-turbo.vpipeline", 34, 33, "Qwen 圖片"),
+    "h3":       ("prepare-minimax-h3-8bit.vpipeline", 185, 66, "H3 影片"),
+    "turbo":    ("prepare-minimax-h3-turbo-lora.vpipeline", 2, 1, "H3 Turbo 加速"),
+    "previews": ("prepare-previews.vpipeline", 1, 0.1, "生成中的預覽"),
+}
+setup_task = {"id": None, "proc": None, "started": None, "error": None, "done": []}
+
+
+def _codex_logged_in():
+    if not CODEX.exists():
+        return False
+    try:
+        r = subprocess.run([str(CODEX), "login", "status"], capture_output=True, text=True,
+                           timeout=15, stdin=subprocess.DEVNULL)
+        return r.returncode == 0 and "logged in" in (r.stdout + r.stderr).lower()
+    except Exception:
+        return False
+
+
+def setup_status():
+    a = model_avail()
+    try:
+        vbin = vpipe_bin()
+    except RuntimeError:
+        vbin = None
+    st = shutil.disk_usage(WORK if WORK.exists() else Path.home())
+    with lock:
+        t = dict(setup_task)
+    t.pop("proc", None)
+    if t["id"]:
+        t["percent"], t["stage"] = _setup_progress(t["id"])
+    previews = (WORK / "models" / "madebyollin" / "taeqi2_1").is_dir() and \
+               (WORK / "models" / "madebyollin" / "taehv").is_dir()
+    items = [
+        {"id": "vpipe", "ok": bool(vbin), "path": vbin, "required": True, "action": "link",
+         "url": VPIPE_RELEASES},
+        {"id": "ffmpeg", "ok": Path(FFMPEG).exists() and Path(FFPROBE).exists(), "path": FFMPEG,
+         "required": True, "action": "command", "command": "brew install ffmpeg"},
+        {"id": "qwen", "ok": a["qwen"], "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["qwen"][1], "final_gb": SETUP_MODELS["qwen"][2]},
+        {"id": "h3", "ok": a["h3"], "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["h3"][1], "final_gb": SETUP_MODELS["h3"][2]},
+        {"id": "turbo", "ok": a["turbo"], "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["turbo"][1], "final_gb": SETUP_MODELS["turbo"][2]},
+        {"id": "previews", "ok": previews, "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["previews"][1], "final_gb": SETUP_MODELS["previews"][2]},
+        {"id": "codex", "ok": CODEX.exists(), "path": str(CODEX) if CODEX.exists() else None,
+         "required": False, "action": "command", "command": "brew install --cask codex",
+         "alt_command": "npm install -g @openai/codex"},
+        {"id": "codex_login", "ok": _codex_logged_in(), "required": False, "action": "login",
+         "blocked": not CODEX.exists()},
+    ]
+    ready = items[0]["ok"] and items[1]["ok"] and (a["qwen"] or a["h3"])
+    return {"items": items, "ready": ready, "work": str(WORK), "free_gb": round(st.free / 1e9),
+            "task": t}
+
+
+def _setup_log(sid):
+    return WORK / "setup" / f"{sid}.log"
+
+
+def _setup_progress(sid):
+    try:
+        tail = _setup_log(sid).read_text(errors="replace").splitlines()[-40:]
+    except OSError:
+        return 0, ""
+    pct, stage = 0, ""
+    for line in tail:
+        m = re.search(r"\[PROGRESS\]\s+(\d+)% of '([^']+)'", line)
+        if m:
+            pct, stage = int(m.group(1)), m.group(2)
+    return pct, stage
+
+
+def setup_install(sid):
+    if sid not in SETUP_MODELS:
+        raise ValueError("未知的安裝項目")
+    pipe, need_gb, _, _ = SETUP_MODELS[sid]
+    try:
+        vbin = vpipe_bin()
+    except RuntimeError as e:
+        raise ValueError(str(e))
+    WORK.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(WORK).free / 1e9
+    if free < need_gb:
+        raise ValueError(f"磁碟空間不夠：需要約 {need_gb} GB，目前只剩 {free:.0f} GB")
+    with lock:
+        if setup_task["proc"] is not None:
+            raise ValueError("已經在安裝別的項目，請等它完成")
+        if current["running"] or queue:
+            raise ValueError("正在生成或排隊中，等任務完成後再安裝")
+        (WORK / "setup").mkdir(exist_ok=True)
+        log = open(_setup_log(sid), "w")
+        proc = subprocess.Popen([vbin, "--launch", str(HERE / "templates" / pipe)], cwd=WORK,
+                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        setup_task.update(id=sid, proc=proc, started=time.time(), error=None)
+
+    def wait():
+        rc = proc.wait()
+        log.close()
+        with lock:
+            setup_task["proc"] = None
+            if rc == 0 and setup_task.get("id") == sid:
+                setup_task["done"] = setup_task["done"] + [sid]
+                setup_task["id"] = None
+            elif setup_task.get("id") == sid:
+                setup_task["error"] = "stopped" if setup_task.get("stopping") else f"vpipe 結束碼 {rc}"
+            setup_task.pop("stopping", None)
+    threading.Thread(target=wait, daemon=True).start()
+    return {"started": sid}
+
+
+def setup_stop():
+    with lock:
+        proc = setup_task["proc"]
+        if proc is None:
+            return False
+        setup_task["stopping"] = True
+    _terminate(proc)
+    return True
+
+
+def setup_codex_login():
+    """Run `codex login`: it opens the browser for the ChatGPT sign-in and
+    finishes by itself; the page polls setup_status for the result."""
+    if not CODEX.exists():
+        raise ValueError("先安裝 Codex CLI")
+    subprocess.Popen([str(CODEX), "login"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return {"started": True}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1257,6 +1397,10 @@ class Handler(BaseHTTPRequestHandler):
         p = unquote(self.path.split("?")[0])
         if p in ("/", "/index.html"):
             return self._file(HERE / "index.html", "text/html; charset=utf-8")
+        if p == "/i18n.js":
+            return self._file(HERE / "i18n.js", "text/javascript; charset=utf-8")
+        if p == "/api/setup":
+            return self._json(setup_status())
         if p == "/api/config":
             sizes = {m: {k: list(v) for k, v in s.items()} for m, s in SIZES.items()}
             avail = model_avail()
@@ -1322,6 +1466,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(library_update(body, self.path.rsplit("/", 1)[1]))
             if self.path == "/api/delete":
                 return self._json({"deleted": delete_job(body.get("id", ""))})
+            if self.path == "/api/setup/install":
+                return self._json(setup_install(body.get("id", "")))
+            if self.path == "/api/setup/stop":
+                return self._json({"stopped": setup_stop()})
+            if self.path == "/api/setup/codex-login":
+                return self._json(setup_codex_login())
             if self.path == "/api/cancel":
                 return self._json({"cancelled": cancel_job(body.get("id", ""))})
         except ValueError as e:

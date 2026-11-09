@@ -4,9 +4,18 @@ A small local web page for running **MiniMax H3** (video with sound) and **Qwen 
 
 一個在 Mac 本機跑 AI 影片和圖片的小網頁。它把 vpipe 的指令包成表單：選模型、大小、秒數，寫 prompt，按「開始生成」就好。
 
-> The interface is in Traditional Chinese. 介面是繁體中文。
+> The interface comes in **English and Traditional Chinese**; switch with the 中文 / EN button in the top-right corner.
+> 介面有繁體中文和英文，右上角切換。
 
 ## 功能 Features
+
+- **⚙ Setup check / 設定檢查**: on first launch the page checks this Mac for vpipe, ffmpeg, Qwen Image, MiniMax H3, the Turbo LoRA, the preview decoders and the Codex CLI, and shows how to get whatever is missing:
+  - a link to the vpipe download page
+  - a copy button for the `brew` commands
+  - one-click **Install** buttons for the models, with progress and disk-space checks
+  - a **Login** button that signs Codex in with your ChatGPT account
+
+  Reopen it any time with **⚙ 設定檢查**.
 
 - **H3 影片**：文字生影片、首／尾幀、參考圖（人物／場景／物品）、參考影片（動作），可開關聲音和背景音樂，可加台詞（含馬來西亞口音英文）。
 - **Qwen 圖片**：文字生圖、參考圖生圖。人物設定圖（三格：正面／背面／特寫）會自動拆成單張再送進模型，避免成品變成拼貼。
@@ -34,7 +43,7 @@ cd vpipe-workbench
 ./start.sh
 ```
 
-`start.sh` starts the server, if it isn't already running, and opens http://127.0.0.1:8765.
+`start.sh` starts the server, if it isn't already running, and opens http://127.0.0.1:8765. The first time, the **⚙ Setup check** panel opens and lists what's missing. Install vpipe from its download page, then let the page download the models for you; the install pipelines are in `templates/prepare-*.vpipeline`. The H3 install downloads about 115 GB, needs about 185 GB free while it runs, ends at 66 GB, and takes hours.
 
 Settings, all optional environment variables:
 
