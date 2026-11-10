@@ -231,6 +231,7 @@
     <div class="row">
       <div class="seg" id="model">
         <button data-v="h3" class="on">MiniMax H3 <small>影片＋聲音</small></button>
+        <button data-v="ltx">LTX-2.5 <small>快速影片＋聲音</small></button>
         <button data-v="qwen">Qwen Image 2.1 <small>圖片</small></button>
       </div>
     </div>
@@ -257,6 +258,7 @@
         <button data-v="frames">首幀／尾幀</button>
         <button data-v="refs">參考圖</button>
       </div>
+      <div class="hint" id="ltxNote" hidden>LTX-2.5：比 H3 快約 2.5 倍，聲音和畫面一起生成；目前只支援純文字或首幀，人物長相不如 H3 穩定，適合先試動作和運鏡。</div>
       <div id="vFrames" class="slots" hidden>
         <div class="slot" data-k="first"><span>首幀</span></div>
         <div class="slot" data-k="last"><span>尾幀</span></div>
@@ -399,9 +401,11 @@
 const $ = s => document.querySelector(s);
 const PROMPTS = {
   h3: "Cinematic shot of a young East Asian woman walking along a quiet Taipei alley at dusk, warm shop lights, light rain on the pavement, the camera tracks slowly beside her. Sound: soft rain, distant scooter, footsteps.",
+  ltx: "Cinematic shot of a young East Asian woman walking along a quiet Taipei alley at dusk, warm shop lights, light rain on the pavement, the camera tracks slowly beside her. Sound: soft rain, distant scooter, footsteps.",
   qwen: "A cozy café corner on a rainy afternoon, a cup of latte with heart latte art on a wooden table, soft window light, film photography look."
 };
 let cfg, model = "h3", size = null;
+const isVid = m => m === "h3" || m === "ltx";   // the two video models share the video controls
 
 function fmt(s) {
   if (s == null) return "—";
@@ -416,14 +420,21 @@ function renderSizes() {
   if (!size || !(size in sizes)) size = Object.keys(sizes)[0];
   box.innerHTML = Object.entries(sizes).map(([k, [w, h]]) => `<option value="${k}">${k}　${w}×${h}</option>`).join("");
   box.value = size;
-  $("#secRow").hidden = model !== "h3";
+  $("#secRow").hidden = !isVid(model);
   $("#refRow").hidden = model !== "qwen";
-  $("#vidRow").hidden = model !== "h3";
-  $("#audRow").hidden = model !== "h3";
+  $("#vidRow").hidden = !isVid(model);
+  $("#audRow").hidden = !isVid(model);
   $("#stepRow").hidden = model !== "h3";
   $("#stepRow2").hidden = model !== "h3";
-  $("#dlgRow").hidden = model !== "h3";
-  $("#draftRow").hidden = model !== "h3";
+  $("#dlgRow").hidden = !isVid(model);
+  $("#draftRow").hidden = !isVid(model);
+  // LTX here: plain text or a first frame only (no last frame, no references yet)
+  const ltx = model === "ltx";
+  document.querySelector('#vmode [data-v="refs"]').hidden = ltx;
+  document.querySelector('#vFrames [data-k="last"]').hidden = ltx;
+  if (ltx && vmode === "refs") selectVmode("text");
+  if (ltx) delete slotImg.last;
+  $("#ltxNote").hidden = !ltx;
   $("#tplSheet").hidden = model !== "qwen";
   $("#aiRow").hidden = false;   // H3: prompt + dialogue; Qwen: image prompt
   stepHint();
@@ -477,6 +488,8 @@ function syncAccelForEngine() {
 }
 function applyAvail() {
   const a = cfg.avail || {};
+  const lb = document.querySelector('#model [data-v="ltx"]');
+  lb.disabled = a.ltx === false; lb.title = a.ltx === false ? "LTX-2.5 模型或外掛還沒裝好" : "";
   const pikaOk = a.pika_fl2va;
   const pb = document.querySelector('#accel option[value="pika"]');
   pb.disabled = !pikaOk; pb.textContent = pikaOk ? "Pika Flex" : "Pika Flex（未下載）";
@@ -494,12 +507,12 @@ function syncAudio() {
   $("#bgmOn").disabled = !on;
   $("#bgmStyle").disabled = !on || !$("#bgmOn").checked;
   $("#bgmStyle").hidden = $("#bgmStyle").disabled;
-  $("#dlgRow").hidden = model !== "h3" || !on;
+  $("#dlgRow").hidden = !isVid(model) || !on;
 }
 $("#audioOn").onchange = syncAudio;
 $("#bgmOn").onchange = syncAudio;
 function audioNote() {
-  if (model !== "h3" || !$("#audioOn").checked) return "";
+  if (!isVid(model) || !$("#audioOn").checked) return "";
   if ($("#bgmOn").checked) {
     const style = $("#bgmStyle").value.trim() || "gentle cinematic";
     return `Background music: ${style} music plays softly under the natural ambient sound.`;
@@ -623,7 +636,8 @@ $("#vmode").onclick = e => {
   renderSlots(); updateEst();
 };
 function h3Extras() {
-  if (model !== "h3") return {};
+  if (!isVid(model)) return {};
+  if (model === "ltx") return vmode === "frames" ? { first: slotImg.first || null } : {};
   if (vmode === "frames") return { first: slotImg.first || null, last: slotImg.last || null };
   if (vmode === "refs") {
     const items = [];
@@ -679,15 +693,18 @@ $("#refFile").onchange = async e => {
   e.target.value = ""; renderRefs(); updateEst();
 };
 
+let estSeq = 0;
 async function updateEst() {
   const secs = $("#seconds").value;
   $("#secVal").textContent = secs;
   const q = new URLSearchParams({ model, size, seconds: secs, steps: effSteps() });
+  const mine = ++estSeq;
   const res = await fetch("/api/estimate?" + q);
+  if (mine !== estSeq) return;   // a newer request is on its way; don't let this one overwrite it
   if (!res.ok) return;           // a stale request from a half-switched form; the next one fills it
   const e = await res.json();
   let html = `<span>Token <b>${e.tokens.toLocaleString()}</b></span><span>粗估時間 <b>${fmt(e.eta_s)}</b></span>`;
-  if (model === "h3") html = `<span>實際長度 <b>${e.real_seconds} 秒</b>（${e.frames} 格）</span>` + html;
+  if (isVid(model)) html = `<span>實際長度 <b>${e.real_seconds} 秒</b>（${e.frames} 格）</span>` + html;
   if (model === "qwen") html = `<span>模式 <b>${refImages.length ? "R2I（" + refImages.length + " 張參考圖）" : "T2I 文字生圖"}</b></span>` + html;
   if (model === "h3" && vmode === "refs" && refVideo) html += `<span><b>＋動作影片</b>：時間約 ×3</span>`;
   $("#est").innerHTML = html + `<span style="color:var(--muted)">依 M3 MacBook Air 實測起算，跑過幾個任務後會照你這台自動校正，僅供參考</span>`;
@@ -706,14 +723,15 @@ $("#run").onclick = async () => {
   $("#err").textContent = "";
   const x = h3Extras();
   if (model === "h3" && vmode === "frames" && !x.first && !x.last) { $("#err").textContent = "請放至少一張首幀或尾幀"; return; }
+  if (model === "ltx" && vmode === "frames" && !x.first) { $("#err").textContent = "請放一張首幀"; return; }
   if (model === "h3" && vmode === "refs" && !x.images) { $("#err").textContent = "請放至少一張參考圖或一段影片"; return; }
   if (x.video && engine !== "ref2va") { $("#err").textContent = "動作影片要用「正式 Ref2VA」"; return; }
   if (model === "h3" && vmode === "refs" && x.images.length > REF_TOTAL) { $("#err").textContent = `參考圖最多 ${REF_TOTAL} 張，目前 ${x.images.length} 張`; return; }
   const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
   const body = { model, size, seconds: +$("#seconds").value, prompt,
-                 audio: model === "h3" ? $("#audioOn").checked : true,
+                 audio: isVid(model) ? $("#audioOn").checked : true,
                  steps: effSteps(), accel, engine: engine === "ref2va" ? "ref2va" : "like", draft: isDraft(),
-                 bgm: model === "h3" && $("#audioOn").checked && $("#bgmOn").checked,
+                 bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
                  images: model === "qwen" ? refImages : (x.images || []),
                  first: x.first || null, last: x.last || null,
@@ -738,7 +756,8 @@ function renderQueue(q) {
   const box = $("#qList"); box.innerHTML = "";
   q.forEach((x, i) => {
     const el = document.createElement("div"); el.className = "qi";
-    const what = x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}` : `Qwen ${x.width}×${x.height}`;
+    const what = x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}`
+      : x.model === "ltx" ? `LTX ${x.width}×${x.height} · ${x.real_seconds} 秒${x.draft ? " · 草稿" : ""}` : `Qwen ${x.width}×${x.height}`;
     el.innerHTML = `<span class="qn">${i + 1}</span><b></b><span class="qp"></span><span>約 ${fmt(x.eta_s)}</span><button>取消</button>`;
     el.querySelector("b").textContent = what;
     el.querySelector(".qp").textContent = x.prompt;
@@ -771,7 +790,7 @@ async function pollOnce() {
   renderQueue(s.queue || []);
   if (j && s.busy) {
     $("#statusCard").hidden = false;
-    $("#stTitle").textContent = `生成中：${j.model === "h3" ? "H3 影片" : "Qwen 圖片"} · ${j.width}×${j.height}` + (j.model === "h3" ? ` · ${j.real_seconds} 秒` : "");
+    $("#stTitle").textContent = `生成中：${({h3: "H3 影片", ltx: "LTX 影片"})[j.model] || "Qwen 圖片"} · ${j.width}×${j.height}` + (isVid(j.model) ? ` · ${j.real_seconds} 秒` : "");
     $("#stBar").style.width = j.percent + "%";
     $("#stStage").textContent = j.stage;
     $("#stPct").textContent = j.percent + "%";
@@ -796,7 +815,7 @@ function setSteps(n) {
 $("#draftOn").onchange = () => {
   if ($("#draftOn").checked) {
     preDraft = { size, steps, seconds: $("#seconds").value };
-    const [w, h] = cfg.sizes.h3[size] || [16, 9];
+    const [w, h] = cfg.sizes[model][size] || [16, 9];
     size = w >= h ? "草稿 16:9" : "草稿 9:16";
     $("#seconds").value = 3; setSteps(4);
   } else if (preDraft) {
@@ -804,7 +823,7 @@ $("#draftOn").onchange = () => {
   }
   renderSizes(); updateEst();
 };
-function isDraft() { return model === "h3" && size.startsWith("草稿"); }
+function isDraft() { return isVid(model) && size.startsWith("草稿"); }
 
 $("#tplSheet").onclick = () => {
   $("#prompt").value = "Character reference sheet of one original fictional character, three panels side by side on a plain light grey background: " +
@@ -861,7 +880,7 @@ const CLEAN_TEXT = "The lines are heard as speech only; the picture shows just t
 const CLEAN_NOTE_FN = () => $("#wantSubs").checked ? "" : CLEAN_TEXT;
 
 function dialogueNote() {
-  if (model !== "h3") return "";
+  if (!isVid(model)) return "";
   const lines = $("#dialogue").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (!lines.length) return "";
   const lang = $("#dlgLang").value;
@@ -1096,7 +1115,7 @@ function mentionItems() {
     refSets.person.forEach((d, i) => out.push({ zh: refSets.person.length > 1 ? `人物 ${i + 1}` : "人物", text: refSets.person.length > 1 ? `person ${i + 1}` : "the person", img: d }));
     refSets.scene.forEach(d => out.push({ zh: "場景", text: "the scene", img: d }));
     refSets.object.forEach((d, i) => out.push({ zh: refSets.object.length > 1 ? `物品 ${i + 1}` : "物品", text: refSets.object.length > 1 ? `object ${i + 1}` : "the object", img: d }));
-  } else if (model === "h3" && vmode === "frames") {
+  } else if (isVid(model) && vmode === "frames") {
     if (slotImg.first) out.push({ zh: "首幀", text: "the first frame", img: slotImg.first });
     if (slotImg.last) out.push({ zh: "尾幀", text: "the last frame", img: slotImg.last });
   } else if (model === "qwen") {
@@ -1195,7 +1214,7 @@ function fillSeedOptions(jobs) {
     if (j.state !== "done" || seen.has(j.seed)) continue;
     seen.add(j.seed);
     const t = (j.prompt || "").replace(/\s+/g, " ").slice(0, 26);
-    opts.push(`<option value="${j.seed}">seed ${j.seed} · ${j.model === "h3" ? "影片" : "圖片"} · ${escapeHtml(t)}…</option>`);
+    opts.push(`<option value="${j.seed}">seed ${j.seed} · ${isVid(j.model) ? "影片" : "圖片"} · ${escapeHtml(t)}…</option>`);
   }
   sel.innerHTML = opts.join("");
   sel.value = [...sel.options].some(o => o.value === keep) ? keep : "random";
@@ -1216,15 +1235,16 @@ async function loadHist() {
     const el = document.createElement("div"); el.className = "item"; el.dataset.seed = String(j.seed);
     const src = "/files/" + j.output;
     let media = "";
-    if (j.state === "done") media = j.model === "h3"
+    if (j.state === "done") media = isVid(j.model)
       ? `<video src="${src}" controls preload="metadata"></video>` : `<a href="${src}" target="_blank"><img src="${src}"></a>`;
-    const len = j.model === "h3"
+    const len = j.model === "ltx" ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.audio === false ? " · 無聲" : "")
+      : j.model === "h3"
       ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.steps ? ` · ${j.steps} 步 · ${({turbo: "Turbo", pika: "Pika", none: "不加速"})[j.accel] || (j.turbo === false ? "不加速" : "Turbo")}` : "")
         + (j.engine === "ref2va" ? " · Ref2VA" : "")
         + (j.audio === false ? " · 無聲" : j.bgm ? " · 有配樂" : "") : "";
     el.innerHTML = `${media}<div class="meta"><p></p>
       <span class="tag ${j.state}">${names[j.state] || j.state}</span>
-      ${j.model === "h3" ? "H3" : "Qwen"} · ${j.width}×${j.height}${len} · ${j.tokens.toLocaleString()} token
+      ${({h3: "H3", ltx: "LTX"})[j.model] || "Qwen"} · ${j.width}×${j.height}${len} · ${j.tokens.toLocaleString()} token
       <br>${j.id} · 用時 ${fmt(j.elapsed_s)} · <span class="seedtag">seed ${j.seed}</span></div>`;
     el.querySelector("p").textContent = j.prompt;
     const conds = [...(j.first ? [["首", j.first]] : []), ...(j.last ? [["尾", j.last]] : []),

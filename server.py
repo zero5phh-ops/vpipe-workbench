@@ -12,6 +12,8 @@ Settings (environment variables, all optional):
   FFMPEG / FFPROBE   ffmpeg tools                        (default: found on PATH)
   CODEX_BIN    Codex CLI for the ✨ AI helper            (default: found below)
   VPIPE_ANE    1 = H3 shares work with the Neural Engine (default 1; 0 = GPU only)
+  VPIPE_LTX_PLUGIN   the vpipe-ltx-2.5 plugin (.so)      (default: found below)
+  VPIPE_LTX_MODEL    LTX-2.5 model under ./models        (default local/LTX-2.5-distilled-8bit)
 """
 import base64
 import json
@@ -42,6 +44,15 @@ VPIPE_CANDIDATES = [p for p in [
 ] if p]
 H3_TEMPLATE = HERE / "templates" / "minimax-h3-text-to-video-turbo.vpipeline"
 QWEN_TEMPLATE = HERE / "templates" / "qwen-image-2.1-turbo.vpipeline"
+LTX_TEMPLATE = HERE / "templates" / "ltx-2.5-text-to-video.vpipeline"
+LTX_MODEL = os.environ.get("VPIPE_LTX_MODEL") or "local/LTX-2.5-distilled-8bit"
+LTX_PLUGIN_CANDIDATES = [p for p in [
+    os.environ.get("VPIPE_LTX_PLUGIN"),
+    str(WORK / "plugins" / "vpipe-ltx-2.5.so"),
+    str(Path.home() / "vpipe-ltx-2.5/build/vpipe-ltx-2.5.so"),
+    str(Path.home() / "Documents/Claude/Projects/vpipe-ltx-2.5/build/vpipe-ltx-2.5.so"),
+] if p]
+VIDEO_MODELS = ("h3", "ltx")
 
 
 def _tool(env, name):
@@ -71,6 +82,13 @@ SIZES = {
         "1:1": (704, 704),
         "草稿 16:9": (608, 352), "草稿 9:16": (352, 608),
     },
+    # LTX-2.5: multiples of 32 too (its VAE compresses space by 32)
+    "ltx": {
+        "16:9": (960, 544), "16:9 小": (832, 480),
+        "9:16": (544, 960), "9:16 小": (480, 832),
+        "1:1": (704, 704),
+        "草稿 16:9": (640, 352), "草稿 9:16": (352, 640),
+    },
     "qwen": {
         "1:1": (1024, 1024), "16:9": (1344, 768), "9:16": (768, 1344),
         "4:3": (1184, 896), "1:1 大 (2048)": (2048, 2048),
@@ -81,6 +99,9 @@ SIZES = {
 # it from this Mac's own finished jobs. Rough estimates only.
 H3_REF = (29070 + 320, 18090.0)     # tokens, seconds (8 s 960x544, 6 steps)
 QWEN_REF = (4175, 232.0)            # tokens, seconds (1024^2, 8 steps, warm)
+# 832x480, 121 frames, first frame, 8-bit model on the internal SSD (2026-11-10)
+LTX_REF = (6240, 1027.0)
+REFS = {"h3": H3_REF, "qwen": QWEN_REF, "ltx": LTX_REF}
 
 lock = threading.Lock()
 current = {"proc": None, "job": None, "running": False}
@@ -92,6 +113,19 @@ def vpipe_bin():
         if Path(p).exists():
             return str(p)
     raise RuntimeError("找不到 vpipe 執行檔（可用環境變數 VPIPE_BIN 指定）")
+
+
+def ltx_plugin():
+    for p in LTX_PLUGIN_CANDIDATES:
+        if Path(p).exists():
+            return str(p)
+    return None
+
+
+def ltx_frames(seconds):
+    """Frames LTX-2.5 renders: 8k+1 (its VAE chunks time by 8), rounded up, at 24 fps."""
+    want = max(9, round(seconds * 24))
+    return 8 * math.ceil((want - 1) / 8) + 1
 
 
 def h3_frames(seconds):
@@ -111,7 +145,7 @@ def calibration(model):
     H3 times are normalised to 6 steps first. Returns (c, p). With only one
     distinct point the exponent stays at the prior and only c moves.
     """
-    pts = [(H3_REF[0], H3_REF[1])] if model == "h3" else [(QWEN_REF[0], QWEN_REF[1])]
+    pts = [REFS[model]]
     for j in list_jobs():
         if j.get("model") == model and j.get("state") == "done" and j.get("elapsed_s") and j.get("tokens"):
             t = j["elapsed_s"]
@@ -131,6 +165,12 @@ def calibration(model):
 
 
 def estimate(model, w, h, seconds, steps=6):
+    if model == "ltx":
+        frames = ltx_frames(seconds)
+        tokens = ((frames - 1) // 8 + 1) * (h // 32) * (w // 32)
+        c, p = calibration("ltx")
+        return {"frames": frames, "real_seconds": round(frames / 24, 2),
+                "tokens": tokens, "eta_s": int(c * tokens ** p)}
     if model == "h3":
         frames = h3_frames(seconds)
         k = (frames - 5) // 17
@@ -504,6 +544,7 @@ def model_avail():
     return {
         "h3": (m / H3_MODEL).is_dir(),
         "qwen": (m / "Qwen" / "Qwen-Image-2.1-Turbo").is_dir(),
+        "ltx": (m / LTX_MODEL / "diffusion_models").is_dir() and ltx_plugin() is not None,
         # the folder appears as soon as quantizing starts; the DiT config is written last
         "ref2va": (m / REF2VA_MODEL / "diffusion_models" / "config.json").exists(),
         "turbo": (m / "larryvrh").is_dir(),
@@ -593,10 +634,22 @@ def apply_accel(pipe, accel, engine, steps):
     return steps
 
 
+def _image_ext(raw):
+    """'.png' / '.jpg' / '.webp' from the bytes themselves, or a refusal: vpipe
+    carries on WITHOUT a picture it cannot read, so a bad upload must stop here."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return ".webp"
+    raise ValueError("這不是可用的圖片（只收 PNG、JPG、WebP）")
+
+
 def save_image(job_id, name, data_url):
-    head, _, b64 = data_url.partition(",")
-    rel = f"jobs/{job_id}/{name}{'.png' if 'png' in head else '.jpg'}"
-    (WORK / rel).write_bytes(base64.b64decode(b64))
+    raw = base64.b64decode(data_url.partition(",")[2])
+    rel = f"jobs/{job_id}/{name}{_image_ext(raw)}"
+    (WORK / rel).write_bytes(raw)
     return rel
 
 
@@ -604,10 +657,9 @@ def save_refs(job_id, images):
     """Write uploaded data-URL images into the job dir; return relative paths."""
     paths = []
     for i, data_url in enumerate(images[:9], 1):   # H3 reads at most 9 pictures
-        head, _, b64 = data_url.partition(",")
-        ext = ".png" if "png" in head else ".jpg"
-        rel = f"jobs/{job_id}/ref{i}{ext}"
-        (WORK / rel).write_bytes(base64.b64decode(b64))
+        raw = base64.b64decode(data_url.partition(",")[2])
+        rel = f"jobs/{job_id}/ref{i}{_image_ext(raw)}"
+        (WORK / rel).write_bytes(raw)
         paths.append(rel)
     return paths
 
@@ -635,6 +687,36 @@ def save_ref_video(job_id, data_url, start, w, h, frames, keep_audio):
     if got.isdigit() and int(got) < 48:
         raise ValueError("參考影片從開始秒數算起太短了，至少要 2 秒")
     return rel
+
+
+def build_ltx(job_id, w, h, seconds, prompt, seed, first=None, audio=True):
+    """LTX-2.5 text-to-video, or image-to-video when a first frame is given
+    (the vpipe-ltx-2.5 plugin's graphs, merged). 8 steps are the checkpoint's."""
+    d = json.loads(LTX_TEMPLATE.read_text())
+    out = f"jobs/{job_id}/output.mp4"
+    mdir = f"./models/{LTX_MODEL}"
+    for s in d["stages"]:
+        c = s.setdefault("config", {})
+        if s["id"] == "model-select":
+            c["hf_dir"] = mdir
+        elif s["id"] == "text-prompt":
+            c["text"] = prompt
+        elif s["id"] == "gen":
+            c.update(width=w, height=h, frames=ltx_frames(seconds), seed=seed)
+        elif s["id"] == "save":
+            c.update(output_url=out, enable_audio=bool(audio))
+    if first:
+        d["stages"][1:1] = [
+            {"id": "load-image", "type": "load-image", "iports": [], "config": {"url": "./" + first}},
+            {"id": "vae-encode", "type": "vae-encode", "iports": [{"src": "load-image", "oport": 0}],
+             "config": {"hf_dir": mdir, "target_width": w, "target_height": h, "unload_when_idle": "always"}}]
+        for s in d["stages"]:
+            if s["id"] == "gen":
+                s["iports"][5] = {"src": "vae-encode", "oport": 0}   # ref_latent0: the clip starts AT it
+            elif s["id"] == "ltx-config":
+                s["config"]["ref_strength"] = 1.0
+    d["id"] = f"simple-{job_id}"
+    return d, out
 
 
 def build_pipeline(job_id, model, w, h, seconds, prompt, seed):
@@ -721,8 +803,14 @@ def kick():
 def _run_one(job, pipeline_path):
     try:
         with open(JOBS / job["id"] / "run.log", "w") as log:
+            cmd = [vpipe_bin(), "--launch", str(pipeline_path)]
+            if job.get("model") == "ltx":
+                plug = ltx_plugin()
+                if not plug:
+                    raise RuntimeError("找不到 vpipe-ltx-2.5 外掛（可用 VPIPE_LTX_PLUGIN 指定）")
+                cmd[1:1] = ["--plugin", plug]
             proc = subprocess.Popen(
-                [vpipe_bin(), "--launch", str(pipeline_path)],
+                cmd,
                 cwd=WORK, stdout=log, stderr=subprocess.STDOUT,
                 start_new_session=True)
             with lock:
@@ -766,8 +854,8 @@ def start_job(body):
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise ValueError("請寫 prompt")
-    seconds = float(body.get("seconds") or 3) if model == "h3" else 0
-    if model == "h3" and not (1 <= seconds <= 10):
+    seconds = float(body.get("seconds") or 3) if model in VIDEO_MODELS else 0
+    if model in VIDEO_MODELS and not (1 <= seconds <= 10):
         raise ValueError("秒數要在 1–10 之間")
     seed = body.get("seed")
     seed = int(seed) if seed not in (None, "") else int(time.time()) % 100000   # 0 is a real seed
@@ -794,7 +882,12 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
     """Save the uploads and write the pipeline for one job (no lock held)."""
     images = body.get("images") or []
     first = last = None
-    if model == "h3" and body.get("first"):
+    if model == "ltx":
+        if images or body.get("last") or body.get("video"):
+            raise ValueError("LTX 目前只支援純文字或首幀（不支援尾幀、參考圖、參考影片）")
+        if not model_avail()["ltx"]:
+            raise ValueError("LTX-2.5 模型或外掛還沒裝好")
+    if model in VIDEO_MODELS and body.get("first"):
         first = save_image(job_id, "first", body["first"])
     if model == "h3" and body.get("last"):
         last = save_image(job_id, "last", body["last"])
@@ -809,7 +902,10 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
                                    h3_frames(seconds), bool(body.get("video_audio")))
         refs = refs + [ref_video]
         body["engine"] = "ref2va"   # clips are a trained input only on the Ref2VA partition
-    if model == "qwen" and refs:
+    if model == "ltx":
+        pipe, out = build_ltx(job_id, w, h, seconds, prompt, seed, first,
+                              body.get("audio", True) is not False)
+    elif model == "qwen" and refs:
         pipe, out = build_qwen_ref(job_id, refs, w, h, prompt, seed)
     elif model == "h3" and (refs or first or last):
         pipe, out = build_h3_conditioned(job_id, w, h, seconds, prompt, seed, first, last, refs)
@@ -832,9 +928,9 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
                 if st_["id"] == "video-ref-encoder":
                     st_["config"]["reference_video_short_edge"] = 0
         turbo = accel != "none"
-    if body.get("preview", True):
+    if body.get("preview", True) and model != "ltx":   # no live preview for LTX yet
         add_preview(pipe, model, job_id)
-    audio = model == "h3" and body.get("audio", True) is not False
+    audio = model in VIDEO_MODELS and body.get("audio", True) is not False
     if model == "h3" and not audio:
         for s in pipe["stages"]:
             if s["id"] == "save-video":
@@ -846,7 +942,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "prompt": prompt, "output": out, "state": "queued",
            "queued_at": time.time(), "draft": bool(body.get("draft")), "refs": refs, "first": first, "last": last,
            "audio": audio, "bgm": bool(body.get("bgm")),
-           "steps": steps, "turbo": turbo, "accel": accel if model == "h3" else None,
+           "steps": steps, "turbo": turbo if model != "ltx" else None, "accel": accel if model == "h3" else None,
            "ane": ANE_ON if model == "h3" else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
