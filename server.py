@@ -11,6 +11,7 @@ Settings (environment variables, all optional):
   VPIPE_PORT   port to listen on                         (default 8765)
   FFMPEG / FFPROBE   ffmpeg tools                        (default: found on PATH)
   CODEX_BIN    Codex CLI for the ✨ AI helper            (default: found below)
+  VPIPE_ANE    1 = H3 shares work with the Neural Engine (default 1; 0 = GPU only)
 """
 import base64
 import json
@@ -531,6 +532,25 @@ ACCEL_LORA = {
 }
 
 
+ANE_ON = os.environ.get("VPIPE_ANE", "1") != "0"
+
+
+def apply_ane(pipe):
+    """Let the Apple Neural Engine take a share of every H3 block (ane_ffn +
+    ane_qkv) and of the video decoder's feed-forward. Measured on an M3 Air
+    24 GB, 832x480 5 s: 72m37s GPU-only -> 43m27s (1.67x), PSNR 36 dB, no
+    visible loss. ane_int8 is left off: on an M3 it was no faster. vpipe
+    falls back to the GPU by itself where the plan cannot grant the module."""
+    if not ANE_ON:
+        return
+    for s in pipe["stages"]:
+        cfg = s.setdefault("config", {})
+        if s["type"] == "generate-video":
+            cfg.update(ane_ffn=True, ane_qkv=True)
+        elif s["type"] == "vae-decode":
+            cfg["ane_ffn"] = True
+
+
 def apply_accel(pipe, accel, engine, steps):
     """Set the H3 partition and speed-up adapter; returns the steps really run.
 
@@ -806,6 +826,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         engine = "ref2va" if (refs and body.get("engine") == "ref2va") else "fl2va"
         check_weights("pika" if engine == "ref2va" else accel, engine)
         steps = apply_accel(pipe, accel, engine, steps)
+        apply_ane(pipe)
         if ref_video:
             for st_ in pipe["stages"]:
                 if st_["id"] == "video-ref-encoder":
@@ -826,6 +847,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "queued_at": time.time(), "draft": bool(body.get("draft")), "refs": refs, "first": first, "last": last,
            "audio": audio, "bgm": bool(body.get("bgm")),
            "steps": steps, "turbo": turbo, "accel": accel if model == "h3" else None,
+           "ane": ANE_ON if model == "h3" else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
            **estimate(model, w, h, seconds, steps)}
