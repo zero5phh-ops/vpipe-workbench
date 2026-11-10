@@ -769,7 +769,8 @@ function renderQueue(q) {
   const box = $("#qList"); box.innerHTML = "";
   q.forEach((x, i) => {
     const el = document.createElement("div"); el.className = "qi";
-    const what = x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}`
+    const what = x.upscale_of ? `H3 放大 ${x.width}×${x.height} · ${x.real_seconds} 秒 · 強度 ${x.strength}`
+      : x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}`
       : `Qwen ${x.width}×${x.height}`;
     el.innerHTML = `<span class="qn">${i + 1}</span><b></b><span class="qp"></span><span>約 ${fmt(x.eta_s)}</span><button>取消</button>`;
     el.querySelector("b").textContent = what;
@@ -803,7 +804,7 @@ async function pollOnce() {
   renderQueue(s.queue || []);
   if (j && s.busy) {
     $("#statusCard").hidden = false;
-    $("#stTitle").textContent = `生成中：${({h3: "H3 影片"})[j.model] || "Qwen 圖片"} · ${j.width}×${j.height}` + (isVid(j.model) ? ` · ${j.real_seconds} 秒` : "");
+    $("#stTitle").textContent = `生成中：${j.upscale_of ? "H3 放大" : ({h3: "H3 影片"})[j.model] || "Qwen 圖片"} · ${j.width}×${j.height}` + (isVid(j.model) ? ` · ${j.real_seconds} 秒` : "");
     $("#stBar").style.width = j.percent + "%";
     $("#stStage").textContent = j.stage;
     $("#stPct").textContent = j.percent + "%";
@@ -1241,6 +1242,47 @@ function fillSeedOptions(jobs) {
 }
 
 let lastHist = "";
+// H3 upscale: the finished clip is the draft; the redraw sees only the prompt,
+// so a lower strength keeps the person, a higher one adds more detail.
+function upscaleForm(j) {
+  const box = document.createElement("div"); box.className = "savebox upbox";
+  box.innerHTML = `<span>重畫強度</span>
+    <select class="ust">
+      <option value="0.4">0.4 最像原片</option>
+      <option value="0.55" selected>0.55 平衡</option>
+      <option value="0.7">0.7 細節多</option>
+      <option value="0.909">0.909 細節最多（人物會變）</option>
+    </select>
+    <select class="usp"><option value="2" selected>2 步</option><option value="3">3 步</option></select>
+    <input class="uex" placeholder="補充人物特徵（選填，英文），例如 a small mole under her left eye, no earrings">
+    <button class="ugo">開始放大</button><button class="ux">取消</button>
+    <div class="hint uest" style="width:100%"></div>`;
+  const body = () => ({ job: j.id, strength: +box.querySelector(".ust").value,
+                        steps: +box.querySelector(".usp").value, extra: box.querySelector(".uex").value });
+  let seq = 0;
+  const est = async () => {
+    const my = ++seq;
+    try {
+      const r = await fetch("/api/upscale", { method: "POST", body: JSON.stringify({ ...body(), dry: true }) });
+      const d = await r.json();
+      if (my !== seq) return;
+      box.querySelector(".uest").textContent = r.ok
+        ? `輸出 ${d.width}×${d.height} · 每步 ${d.tokens.toLocaleString()} token · 約 ${fmt(d.eta_s)}。放大時不看首幀，只看 prompt；強度越高，臉越可能變成別人。`
+        : (d.error || "無法估算");
+    } catch (e) { box.querySelector(".uest").textContent = "無法估算"; }
+  };
+  box.querySelector(".ust").onchange = est; box.querySelector(".usp").onchange = est;
+  box.querySelector(".ux").onclick = () => box.remove();
+  box.querySelector(".ugo").onclick = async () => {
+    const r = await fetch("/api/upscale", { method: "POST", body: JSON.stringify(body()) });
+    const d = await r.json();
+    if (!r.ok) { box.querySelector(".uest").textContent = d.error || "失敗"; return; }
+    box.remove(); lastHist = ""; poll();
+  };
+  est();
+  return box;
+}
+
 async function loadHist() {
   const jobs = await (await fetch("/api/jobs")).json();
   const sig = JSON.stringify(jobs.map(j => j.id + j.state));
@@ -1257,7 +1299,9 @@ async function loadHist() {
     let media = "";
     if (j.state === "done") media = isVid(j.model)
       ? `<video src="${src}" controls preload="metadata"></video>` : `<a href="${src}" target="_blank"><img src="${src}"></a>`;
-    const len = j.model === "h3"
+    const len = j.upscale_of
+      ? ` · ${j.real_seconds} 秒 · 放大 ×2 · 重畫強度 ${j.strength} · ${j.steps} 步 · 來自 ${j.upscale_of}`
+      : j.model === "h3"
       ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.steps ? ` · ${j.steps} 步 · ${({turbo: "Turbo", pika: "Pika", none: "不加速"})[j.accel] || (j.turbo === false ? "不加速" : "Turbo")}` : "")
         + (j.engine === "ref2va" ? " · Ref2VA" : "")
         + (j.lora ? ` · LoRA ${escapeHtml(j.lora.replace(/\.safetensors$/, ""))} ×${j.lora_scale}` : "")
@@ -1291,6 +1335,13 @@ async function loadHist() {
         };
       }
       el.querySelector(".meta").appendChild(sb);
+      if (j.model === "h3" && !j.upscale_of) {
+        const ub = document.createElement("button"); ub.className = "savebtn"; ub.textContent = "⤢ 放大 2 倍";
+        ub.disabled = !(cfg.avail || {}).h3_upscale;
+        ub.title = ub.disabled ? "還沒有 H3 放大模型（Open-H3-Regenerate-2K，約 12 GB）" : "用這段影片當草稿，放大到寬高各 2 倍再重畫";
+        ub.onclick = () => { if (!el.querySelector(".upbox")) el.querySelector(".meta").appendChild(upscaleForm(j)); };
+        el.querySelector(".meta").appendChild(ub);
+      }
     }
     if (j.state !== "running") {
       const del = document.createElement("button");
@@ -1338,6 +1389,10 @@ const SETUP_TEXT = {
     L("讓 H3 只要 4–8 步就有乾淨的畫面，約 1 GB。", "Lets H3 look clean in 4–8 steps. About 1 GB.")],
   previews: () => [L("即時預覽（建議）", "Live previews (recommended)"),
     L("生成時看到每一步的低解析度草稿，很小。", "Shows a low-res draft after every step while generating. Tiny.")],
+  fast_vae: () => [L("H3 快速解碼（建議）", "H3 fast decode (recommended)"),
+    L("解碼從約 6 分半降到約 1 分鐘，約 6.5 GB。", "Cuts the decode from about 6½ min to about 1 min. About 6.5 GB.")],
+  upscale: () => [L("H3 放大 2 倍（選用）", "H3 2× upscale (optional)"),
+    L("在歷史紀錄把完成的 H3 影片放大到寬高各 2 倍再重畫。約 12 GB；5 秒影片在 M3 Air 上要約 3 小時。", "Doubles a finished H3 clip and redraws it, from the History card. About 12 GB; a 5 s clip takes about 3 hours on an M3 Air.")],
   codex: () => [L("Codex CLI（✨ AI 優化用，選用）", "Codex CLI (for ✨ AI enhance, optional)"),
     L("裝了 ChatGPT 桌面版就已經有了；不然在「終端機」執行：", "Included with the ChatGPT desktop app; otherwise run this in Terminal:")],
   codex_login: it => [L("登入 ChatGPT（✨ AI 優化用）", "Sign in to ChatGPT (for ✨ AI enhance)"),

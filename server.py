@@ -115,7 +115,8 @@ def calibration(model):
     """
     pts = [REFS[model]]
     for j in list_jobs():
-        if j.get("model") == model and j.get("state") == "done" and j.get("elapsed_s") and j.get("tokens"):
+        if (j.get("model") == model and j.get("state") == "done" and j.get("elapsed_s") and j.get("tokens")
+                and not j.get("upscale_of")):
             t = j["elapsed_s"]
             if model == "h3":
                 t /= _step_factor(j.get("steps"))
@@ -510,7 +511,9 @@ def model_avail():
         "ref2va": (m / REF2VA_MODEL / "diffusion_models" / "config.json").exists(),
         "turbo": (m / "larryvrh").is_dir(),
         "vdn": (m / "OpenVDN").is_dir(),
-        "fast_vae": (m / "Efficient-Large-Model").is_dir(),
+        "fast_vae": any((m / "Efficient-Large-Model").glob("**/vae_fast*")) or
+                    (m / "Efficient-Large-Model" / "Open-H3-Regenerate-2K-fast-vae").is_dir(),
+        "h3_upscale": upscale_ok(),
         "ref2va_turbo": (m / "lightx2v").is_dir(),
         "pika_fl2va": pika.is_dir() and any(pika.glob("**/fl2va*")),
         "pika_ref2va": pika.is_dir() and any(pika.glob("**/ref2va*")),
@@ -827,6 +830,8 @@ def _run_one(job, pipeline_path):
     try:
         with open(JOBS / job["id"] / "run.log", "w") as log:
             cmd = [vpipe_bin(), "--launch", str(pipeline_path)]
+            if Path("/usr/bin/caffeinate").exists():   # a long job must not stop when the Mac idles
+                cmd = ["/usr/bin/caffeinate", "-ims"] + cmd
             proc = subprocess.Popen(
                 cmd,
                 cwd=WORK, stdout=log, stderr=subprocess.STDOUT,
@@ -857,6 +862,146 @@ def _run_one(job, pipeline_path):
             job["state"] = "failed"
             job["error"] = f"vpipe 結束碼 {rc}"
         save_job(job)
+
+
+# ---- H3 upscale: Open-H3-Regenerate-2K, a second pass over a finished clip ----
+# The finished clip is encoded, its latent doubled by NVIDIA's latent upscaler,
+# then put back to `strength` noise and redrawn by H3 in `steps` steps at twice
+# the size, under the release's merged LoRA. The first frame is NOT used: the
+# redraw sees only the prompt, so a high strength repaints the face (measured
+# 2026-11-10: at 0.909 Luna lost her mole and gained earrings).
+REGEN_TEMPLATE = HERE / "templates" / "minimax-h3-regenerate-2k.vpipeline"
+REGEN_DIR = WORK / "models" / "Efficient-Large-Model" / "Open-H3-Regenerate-2K"
+UPSCALE_STRENGTHS = (0.4, 0.55, 0.7, 0.909)
+# Measured on an M3 Air 24 GB: 56 frames 832x480 -> 1664x960, 26,880 rows a
+# forward, 3 steps 4519 s, decode 192 s, the whole run 85 min.
+UPSCALE_REF = {"rows": 26880, "step_s": 1506.0, "decode_s": 192.0, "fixed_s": 150.0, "p": 1.6}
+
+
+def upscale_ok():
+    return (REGEN_DIR / "lora").is_dir() and any(REGEN_DIR.glob("**/*upscaler*.safetensors"))
+
+
+def upscale_estimate(w, h, frames, steps):
+    """Rows a forward and the run time at twice the size; refit from this
+    Mac's finished upscales (their measured / predicted ratio)."""
+    latents = 2 + 5 * ((frames - 5) // 17)
+    rows = latents * (2 * h // 32) * (2 * w // 32) + 360
+    r = UPSCALE_REF
+    def model_s(rows_, steps_):
+        x = rows_ / r["rows"]
+        return steps_ * r["step_s"] * x ** r["p"] + r["decode_s"] * x + r["fixed_s"]
+    ratios = [j["elapsed_s"] / model_s(j["tokens"], j.get("steps") or 3)
+              for j in list_jobs(limit=None)
+              if j.get("upscale_of") and j.get("state") == "done" and j.get("elapsed_s") and j.get("tokens")]
+    k = sorted(ratios)[len(ratios) // 2] if ratios else 1.0
+    return {"tokens": rows, "eta_s": int(k * model_s(rows, steps))}
+
+
+def _upscale_source(src_id):
+    if not re.fullmatch(r"[0-9]{8}-[0-9]{6}(-[0-9]+)?", str(src_id or "")):
+        raise ValueError("找不到這個影片")
+    f = JOBS / src_id / "job.json"
+    if not f.exists():
+        raise ValueError("找不到這個影片")
+    src = json.loads(f.read_text())
+    if src.get("model") != "h3" or src.get("state") != "done" or src.get("upscale_of"):
+        raise ValueError("只能放大已完成的 H3 影片（放大過的不能再放大）")
+    if not (WORK / src["output"]).exists():
+        raise ValueError("原影片檔不見了")
+    return src
+
+
+def _upscale_args(body):
+    try:
+        strength = float(body.get("strength") or 0.55)
+        steps = int(body.get("steps") or 2)
+    except (TypeError, ValueError):
+        raise ValueError("重畫強度或步數不對")
+    if strength not in UPSCALE_STRENGTHS:
+        raise ValueError("重畫強度只能是 0.4、0.55、0.7 或 0.909")
+    if steps not in (2, 3):
+        raise ValueError("步數只能是 2 或 3")
+    extra = re.sub(r"\s+", " ", str(body.get("extra") or "")).strip()[:400]
+    return strength, steps, extra
+
+
+def build_upscale(job_id, src, strength, steps, extra):
+    d = json.loads(REGEN_TEMPLATE.read_text())
+    w, h = src["width"], src["height"]
+    frames = h3_frames(src["seconds"])
+    draft = "./" + src["output"]
+    out = f"jobs/{job_id}/output.mp4"
+    prompt = src["prompt"] + (("\n" + extra) if extra else "")
+    for s in d["stages"]:
+        c = s.setdefault("config", {})
+        i = s["id"]
+        if i == "model-select":
+            c["hf_dir"] = H3_MODEL
+        elif i == "load-draft":
+            c["input_url"] = draft
+        elif i == "draft-head":
+            c["end"] = frames
+        elif i == "draft-fit":
+            c.update(width=w, height=h)
+        elif i == "latent-upscale":
+            c.update(width=2 * w, height=2 * h, frames=frames)
+        elif i == "text-prompt":
+            c["text"] = prompt
+        elif i == "minimax-h3-model-config":
+            c["refine_start_sigma"] = strength
+        elif i == "generate-video":
+            c.update(width=2 * w, height=2 * h, frames=frames, steps=steps)
+        elif i == "vae-decode" and model_avail()["fast_vae"]:
+            c["fast_decoder"] = FAST_VAE
+        elif i == "load-audio":
+            c.update(input_url=draft, duration_s=round(frames / 24, 4))
+        elif i == "save-video":
+            c["output_url"] = out
+            for k in ("video_bitrate", "video_gop_size"):
+                c.pop(k, None)
+    set_video_bitrate(d, 2 * w, 2 * h)
+    d["id"] = f"upscale-{job_id}"
+    return d, out, frames, prompt
+
+
+def start_upscale(body):
+    """Queue a 2x upscale of a finished H3 clip; {"dry": true} only estimates."""
+    if not upscale_ok():
+        raise ValueError("還沒有 H3 放大模型（Open-H3-Regenerate-2K，約 12 GB）")
+    src = _upscale_source(body.get("job"))
+    strength, steps, extra = _upscale_args(body)
+    est = upscale_estimate(src["width"], src["height"], h3_frames(src["seconds"]), steps)
+    if body.get("dry"):
+        return {**est, "width": 2 * src["width"], "height": 2 * src["height"]}
+    if setup_task["proc"] is not None:
+        raise ValueError("正在安裝模型，裝好後再放大")
+    with lock:
+        job_id = time.strftime("%Y%m%d-%H%M%S")
+        n = 2
+        while (JOBS / job_id).exists():
+            job_id = time.strftime("%Y%m%d-%H%M%S") + f"-{n}"
+            n += 1
+        (JOBS / job_id).mkdir(parents=True, exist_ok=True)
+    try:
+        pipe, out, frames, prompt = build_upscale(job_id, src, strength, steps, extra)
+        pipe_path = JOBS / job_id / "pipeline.vpipeline"
+        pipe_path.write_text(json.dumps(pipe, ensure_ascii=False, indent=2))
+    except BaseException:
+        shutil.rmtree(JOBS / job_id, ignore_errors=True)
+        raise
+    job = {"id": job_id, "model": "h3", "upscale_of": src["id"], "size": src.get("size"),
+           "width": 2 * src["width"], "height": 2 * src["height"],
+           "seconds": src["seconds"], "real_seconds": round(frames / 24, 2), "frames": frames,
+           "seed": src.get("seed"), "prompt": prompt, "output": out, "state": "queued",
+           "queued_at": time.time(), "steps": steps, "strength": strength,
+           "audio": src.get("audio", True), "lora": src.get("lora"), "lora_scale": src.get("lora_scale"),
+           **est}
+    with lock:
+        save_job(job)
+        queue.append((job, pipe_path))
+    kick()
+    return job
 
 
 def start_job(body):
@@ -1372,6 +1517,8 @@ SETUP_MODELS = {
     "h3":       ("prepare-minimax-h3-8bit.vpipeline", 185, 66, "H3 影片"),
     "turbo":    ("prepare-minimax-h3-turbo-lora.vpipeline", 2, 1, "H3 Turbo 加速"),
     "previews": ("prepare-previews.vpipeline", 1, 0.1, "生成中的預覽"),
+    "upscale":  ("prepare-open-h3-regenerate-2k.vpipeline", 14, 12.3, "H3 放大 2 倍"),
+    "fast_vae": ("prepare-open-h3-regenerate-2k-fast-vae.vpipeline", 8, 6.5, "H3 快速解碼"),
 }
 setup_task = {"id": None, "proc": None, "started": None, "error": None, "done": []}
 
@@ -1414,6 +1561,10 @@ def setup_status():
          "need_gb": SETUP_MODELS["turbo"][1], "final_gb": SETUP_MODELS["turbo"][2]},
         {"id": "previews", "ok": previews, "required": False, "action": "install",
          "need_gb": SETUP_MODELS["previews"][1], "final_gb": SETUP_MODELS["previews"][2]},
+        {"id": "fast_vae", "ok": a["fast_vae"], "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["fast_vae"][1], "final_gb": SETUP_MODELS["fast_vae"][2]},
+        {"id": "upscale", "ok": a["h3_upscale"], "required": False, "action": "install",
+         "need_gb": SETUP_MODELS["upscale"][1], "final_gb": SETUP_MODELS["upscale"][2]},
         {"id": "codex", "ok": CODEX.exists(), "path": str(CODEX) if CODEX.exists() else None,
          "required": False, "action": "command", "command": "brew install --cask codex",
          "alt_command": "npm install -g @openai/codex"},
@@ -1635,6 +1786,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/run":
                 return self._json(start_job(body))
+            if self.path == "/api/upscale":
+                return self._json(start_upscale(body))
             if self.path == "/api/assist":
                 return self._json(assist(body))
             if self.path == "/api/stop":

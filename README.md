@@ -22,6 +22,10 @@ A small local web page for running **MiniMax H3** (video with sound) and **Qwen 
 - **H3 影片**：文字生影片、首／尾幀、參考圖（人物／場景／物品）、參考影片（動作），可開關聲音和背景音樂，可加台詞（含馬來西亞口音英文）。
 - **Qwen 圖片**：文字生圖、參考圖生圖。人物設定圖（三格：正面／背面／特寫）會自動拆成單張再送進模型，避免成品變成拼貼。
 - **✨ AI 優化**：把一句中文想法改寫成詳細的 prompt（需要 Codex CLI，用 ChatGPT 帳號登入）。
+- **人物 LoRA**：把自己訓練的 LoRA（`.safetensors`）放進 `~/vpipe-work/models/lora`，H3 或 Qwen 會只列出適用自己的那些，並提示觸發詞。
+- **H3 省時選項**：Neural Engine 分擔運算（預設開，`VPIPE_ANE=0` 關閉）、快速解碼、VDN。在 M3 MacBook Air 上，5 秒 832×480 從約 73 分鐘降到約 35 分鐘。
+- **⤢ 放大 2 倍**：在歷史紀錄把完成的 H3 影片放大到寬高各 2 倍再重畫（[Open-H3-Regenerate-2K](https://huggingface.co/Efficient-Large-Model/Open-H3-Regenerate-2K)，約 12 GB）。可選重畫強度：越低越像原片，越高細節越多但臉可能變成別人。5 秒影片在 M3 Air 上約 3 小時。
+- 影片依尺寸存成足夠的碼率（vpipe 預設固定 2 Mbps，會把皮膚和頭髮壓糊）；跑的時候 Mac 不會自動睡眠。
 - 排隊、停止、即時預覽、從實際跑過的任務自動校正預估時間、參考圖庫（@ 插入）。
 - 只聽 `127.0.0.1`，並拒絕其他網站送來的請求。
 
@@ -34,7 +38,7 @@ A small local web page for running **MiniMax H3** (video with sound) and **Qwen 
 - Model weights, downloaded with vpipe into its workspace (`~/vpipe-work/models` by default). See vpipe's own docs:
   - Qwen Image 2.1 Turbo: `Qwen/Qwen-Image-2.1-Turbo`
   - MiniMax H3, quantized locally to `local/MiniMax-H3-FL2VA-8bit`. A different id can be set with `VPIPE_H3_MODEL`.
-  - Optional extras: the Turbo LoRA (`larryvrh/MiniMax-H3-Turbo-Lora`), Pika H3 Flex, H3 Ref2VA (`local/MiniMax-H3-Ref2VA-4bit`), and the `madebyollin/taeqi2_1` preview decoder. The page greys out anything that isn't installed.
+  - Optional extras: the Turbo LoRA (`larryvrh/MiniMax-H3-Turbo-Lora`), Pika H3 Flex, H3 Ref2VA (`local/MiniMax-H3-Ref2VA-4bit`), the `madebyollin/taeqi2_1` preview decoder, VDN (`OpenVDN`), and Open-H3-Regenerate-2K (2× upscale and its fast decoder). The page greys out anything that isn't installed.
 - Optional: the [Codex CLI](https://github.com/openai/codex), for the ✨ AI 優化 button.
 
 ## 使用 Usage
