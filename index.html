@@ -231,7 +231,6 @@
     <div class="row">
       <div class="seg" id="model">
         <button data-v="h3" class="on">MiniMax H3</button>
-        <button data-v="ltx">LTX-2.5</button>
         <button data-v="qwen">Qwen Image 2.1</button>
       </div>
     </div>
@@ -252,9 +251,6 @@
         <label class="fld"><span>LoRA 強度</span><input type="number" id="loraScale" min="0.1" max="2" step="0.1" value="1"></label>
       </div>
       <div class="hint" id="loraHint" hidden></div>
-      <div class="fields" id="upRow" hidden>
-        <label class="tg sm"><input type="checkbox" id="ltxUp"> 2 倍放大（輸出寬高各 ×2，多約 6 分鐘）</label>
-      </div>
       <div class="fields" id="fastRow">
         <label class="tg sm"><input type="checkbox" id="fastVae"> 快速解碼（約省 5 分鐘）</label>
         <label class="tg sm"><input type="checkbox" id="vdnOn"> VDN 加速（約省 2 分鐘）</label>
@@ -270,7 +266,6 @@
         <button data-v="frames">首幀／尾幀</button>
         <button data-v="refs">參考圖</button>
       </div>
-      <div class="hint" id="ltxNote" hidden>LTX-2.5：比 H3 快約 2.5 倍，聲音和畫面一起生成；目前只支援純文字或首幀，人物長相不如 H3 穩定，適合先試動作和運鏡。</div>
       <div id="vFrames" class="slots" hidden>
         <div class="slot" data-k="first"><span>首幀</span></div>
         <div class="slot" data-k="last"><span>尾幀</span></div>
@@ -409,11 +404,10 @@
 const $ = s => document.querySelector(s);
 const PROMPTS = {
   h3: "Cinematic shot of a young East Asian woman walking along a quiet Taipei alley at dusk, warm shop lights, light rain on the pavement, the camera tracks slowly beside her. Sound: soft rain, distant scooter, footsteps.",
-  ltx: "Cinematic shot of a young East Asian woman walking along a quiet Taipei alley at dusk, warm shop lights, light rain on the pavement, the camera tracks slowly beside her. Sound: soft rain, distant scooter, footsteps.",
   qwen: "A cozy café corner on a rainy afternoon, a cup of latte with heart latte art on a wooden table, soft window light, film photography look."
 };
 let cfg, model = "h3", size = null;
-const isVid = m => m === "h3" || m === "ltx";   // the two video models share the video controls
+const isVid = m => m === "h3";
 
 function fmt(s) {
   if (s == null) return "—";
@@ -423,8 +417,6 @@ function fmt(s) {
 }
 
 function syncFast() {
-  $("#upRow").hidden = model !== "ltx";
-  { const ok = (cfg.avail || {}).ltx_upscale; $("#ltxUp").disabled = !ok; if (!ok) $("#ltxUp").checked = false; }
   $("#fastRow").hidden = model !== "h3";
   { const av = cfg.avail || {};
     $("#fastVae").disabled = !av.fast_vae; if (!av.fast_vae) $("#fastVae").checked = false;
@@ -450,13 +442,6 @@ function renderSizes() {
   renderLoras();
   $("#dlgRow").hidden = !isVid(model);
   $("#draftRow").hidden = !isVid(model);
-  // LTX here: plain text or a first frame only (no last frame, no references yet)
-  const ltx = model === "ltx";
-  document.querySelector('#vmode [data-v="refs"]').hidden = ltx;
-  document.querySelector('#vFrames [data-k="last"]').hidden = ltx;
-  if (ltx && vmode === "refs") selectVmode("text");
-  if (ltx) delete slotImg.last;
-  $("#ltxNote").hidden = !ltx;
   $("#tplSheet").hidden = model !== "qwen";
   $("#aiRow").hidden = false;   // H3: prompt + dialogue; Qwen: image prompt
   stepHint();
@@ -522,8 +507,6 @@ $("#lora").onchange = renderLoras;
 function applyAvail() {
   renderLoras();
   const a = cfg.avail || {};
-  const lb = document.querySelector('#model [data-v="ltx"]');
-  lb.disabled = a.ltx === false; lb.title = a.ltx === false ? "LTX-2.5 模型或外掛還沒裝好" : "";
   const pikaOk = a.pika_fl2va;
   const pb = document.querySelector('#accel option[value="pika"]');
   pb.disabled = !pikaOk; pb.textContent = pikaOk ? "Pika Flex" : "Pika Flex（未下載）";
@@ -668,7 +651,6 @@ $("#vmode").onclick = e => {
 };
 function h3Extras() {
   if (!isVid(model)) return {};
-  if (model === "ltx") return vmode === "frames" ? { first: slotImg.first || null } : {};
   if (vmode === "frames") return { first: slotImg.first || null, last: slotImg.last || null };
   if (vmode === "refs") {
     const items = [];
@@ -754,7 +736,6 @@ $("#run").onclick = async () => {
   $("#err").textContent = "";
   const x = h3Extras();
   if (model === "h3" && vmode === "frames" && !x.first && !x.last) { $("#err").textContent = "請放至少一張首幀或尾幀"; return; }
-  if (model === "ltx" && vmode === "frames" && !x.first) { $("#err").textContent = "請放一張首幀"; return; }
   if (model === "h3" && vmode === "refs" && !x.images) { $("#err").textContent = "請放至少一張參考圖或一段影片"; return; }
   if (model === "h3" && vmode === "refs" && x.images.length > REF_TOTAL) { $("#err").textContent = `參考圖最多 ${REF_TOTAL} 張，目前 ${x.images.length} 張`; return; }
   const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
@@ -762,7 +743,7 @@ $("#run").onclick = async () => {
                  audio: isVid(model) ? $("#audioOn").checked : true,
                  lora: (model === "h3" || model === "qwen") ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
                  steps: effSteps(), accel, engine, draft: isDraft(),
-                 upscale: model === "ltx" && $("#ltxUp").checked, fast_vae: model === "h3" && $("#fastVae").checked, vdn: model === "h3" && $("#vdnOn").checked,
+                 fast_vae: model === "h3" && $("#fastVae").checked, vdn: model === "h3" && $("#vdnOn").checked,
                  bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
                  images: model === "qwen" ? refImages : (x.images || []),
@@ -789,7 +770,7 @@ function renderQueue(q) {
   q.forEach((x, i) => {
     const el = document.createElement("div"); el.className = "qi";
     const what = x.model === "h3" ? `H3 ${x.width}×${x.height} · ${x.real_seconds} 秒 · ${x.steps} 步${x.draft ? " · 草稿" : ""}`
-      : x.model === "ltx" ? `LTX ${x.width}×${x.height} · ${x.real_seconds} 秒${x.draft ? " · 草稿" : ""}` : `Qwen ${x.width}×${x.height}`;
+      : `Qwen ${x.width}×${x.height}`;
     el.innerHTML = `<span class="qn">${i + 1}</span><b></b><span class="qp"></span><span>約 ${fmt(x.eta_s)}</span><button>取消</button>`;
     el.querySelector("b").textContent = what;
     el.querySelector(".qp").textContent = x.prompt;
@@ -822,7 +803,7 @@ async function pollOnce() {
   renderQueue(s.queue || []);
   if (j && s.busy) {
     $("#statusCard").hidden = false;
-    $("#stTitle").textContent = `生成中：${({h3: "H3 影片", ltx: "LTX 影片"})[j.model] || "Qwen 圖片"} · ${j.width}×${j.height}` + (isVid(j.model) ? ` · ${j.real_seconds} 秒` : "");
+    $("#stTitle").textContent = `生成中：${({h3: "H3 影片"})[j.model] || "Qwen 圖片"} · ${j.width}×${j.height}` + (isVid(j.model) ? ` · ${j.real_seconds} 秒` : "");
     $("#stBar").style.width = j.percent + "%";
     $("#stStage").textContent = j.stage;
     $("#stPct").textContent = j.percent + "%";
@@ -911,26 +892,11 @@ function sayPrefix(sp) {
 const CLEAN_TEXT = "The lines are heard as speech only; the picture shows just the scene and the people.";
 const CLEAN_NOTE_FN = () => $("#wantSubs").checked ? "" : CLEAN_TEXT;
 
-const LTX_LANG = { Chinese: "Mandarin Chinese", English: "English", Malay: "Malay", Japanese: "Japanese",
-                   Manglish: "English with a casual Malaysian accent" };
-function ltxDialogueNote(lines, lang) {
-  // LTX-2.5 reads speech as plain sentences with the words in quotes. H3's
-  // <d>[Lang]…</d> tags mean nothing to it and come out as garbled on-screen text.
-  const said = lines.map(splitSpeaker).map(sp => {
-    const l = lang === "MYmix" ? myLineLang(sp.text) : { lang, text: sp.text.replace(/^[中馬马英][:：]\s*/, "") };
-    const who = sp.speaker || "The person";
-    const how = sp.acts.length ? `, ${sp.acts.join(", ")},` : "";
-    return `${who}${how} says in ${LTX_LANG[l.lang] || l.lang}: "${l.text}"`;
-  });
-  return said.join(" Then ") + " Each line is spoken once, clearly, with the lips moving in sync, and the speaker's mouth rests closed when the line is over."
-    + ($("#wantSubs").checked ? "" : " The speech is only heard; the frame stays clean, with no subtitles, captions or on-screen text.");
-}
 function dialogueNote() {
   if (!isVid(model)) return "";
   const lines = $("#dialogue").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (!lines.length) return "";
   const lang = $("#dlgLang").value;
-  if (model === "ltx") return ltxDialogueNote(lines, lang);
   const head = "Dialogue, each line is spoken only once, in this order: ";
   const sps = lines.map(splitSpeaker);
   const named = sps.some(sp => sp.speaker);
@@ -1291,15 +1257,14 @@ async function loadHist() {
     let media = "";
     if (j.state === "done") media = isVid(j.model)
       ? `<video src="${src}" controls preload="metadata"></video>` : `<a href="${src}" target="_blank"><img src="${src}"></a>`;
-    const len = j.model === "ltx" ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.audio === false ? " · 無聲" : "")
-      : j.model === "h3"
+    const len = j.model === "h3"
       ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.steps ? ` · ${j.steps} 步 · ${({turbo: "Turbo", pika: "Pika", none: "不加速"})[j.accel] || (j.turbo === false ? "不加速" : "Turbo")}` : "")
         + (j.engine === "ref2va" ? " · Ref2VA" : "")
         + (j.lora ? ` · LoRA ${escapeHtml(j.lora.replace(/\.safetensors$/, ""))} ×${j.lora_scale}` : "")
         + (j.audio === false ? " · 無聲" : j.bgm ? " · 有配樂" : "") : "";
     el.innerHTML = `${media}<div class="meta"><p></p>
       <span class="tag ${j.state}">${names[j.state] || j.state}</span>
-      ${({h3: "H3", ltx: "LTX"})[j.model] || "Qwen"} · ${j.width}×${j.height}${len} · ${j.tokens.toLocaleString()} token
+      ${({h3: "H3"})[j.model] || "Qwen"} · ${j.width}×${j.height}${len} · ${j.tokens.toLocaleString()} token
       <br>${j.id} · 用時 ${fmt(j.elapsed_s)} · <span class="seedtag">seed ${j.seed}</span></div>`;
     el.querySelector("p").textContent = j.prompt;
     const conds = [...(j.first ? [["首", j.first]] : []), ...(j.last ? [["尾", j.last]] : []),

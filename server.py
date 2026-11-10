@@ -12,8 +12,6 @@ Settings (environment variables, all optional):
   FFMPEG / FFPROBE   ffmpeg tools                        (default: found on PATH)
   CODEX_BIN    Codex CLI for the ✨ AI helper            (default: found below)
   VPIPE_ANE    1 = H3 shares work with the Neural Engine (default 1; 0 = GPU only)
-  VPIPE_LTX_PLUGIN   the vpipe-ltx-2.5 plugin (.so)      (default: found below)
-  VPIPE_LTX_MODEL    LTX-2.5 model under ./models        (default local/LTX-2.5-distilled-8bit)
 """
 import base64
 import json
@@ -44,15 +42,7 @@ VPIPE_CANDIDATES = [p for p in [
 ] if p]
 H3_TEMPLATE = HERE / "templates" / "minimax-h3-text-to-video-turbo.vpipeline"
 QWEN_TEMPLATE = HERE / "templates" / "qwen-image-2.1-turbo.vpipeline"
-LTX_TEMPLATE = HERE / "templates" / "ltx-2.5-text-to-video.vpipeline"
-LTX_MODEL = os.environ.get("VPIPE_LTX_MODEL") or "local/LTX-2.5-distilled-8bit"
-LTX_PLUGIN_CANDIDATES = [p for p in [
-    os.environ.get("VPIPE_LTX_PLUGIN"),
-    str(WORK / "plugins" / "vpipe-ltx-2.5.so"),
-    str(Path.home() / "vpipe-ltx-2.5/build/vpipe-ltx-2.5.so"),
-    str(Path.home() / "Documents/Claude/Projects/vpipe-ltx-2.5/build/vpipe-ltx-2.5.so"),
-] if p]
-VIDEO_MODELS = ("h3", "ltx")
+VIDEO_MODELS = ("h3",)
 
 
 def _tool(env, name):
@@ -82,13 +72,6 @@ SIZES = {
         "1:1": (704, 704),
         "草稿 16:9": (608, 352), "草稿 9:16": (352, 608),
     },
-    # LTX-2.5: multiples of 32 too (its VAE compresses space by 32)
-    "ltx": {
-        "16:9": (960, 544), "16:9 小": (832, 480),
-        "9:16": (544, 960), "9:16 小": (480, 832),
-        "1:1": (704, 704),
-        "草稿 16:9": (640, 352), "草稿 9:16": (352, 640),
-    },
     "qwen": {
         "1:1": (1024, 1024), "16:9": (1344, 768), "9:16": (768, 1344),
         "4:3": (1184, 896), "1:1 大 (2048)": (2048, 2048),
@@ -99,9 +82,7 @@ SIZES = {
 # it from this Mac's own finished jobs. Rough estimates only.
 H3_REF = (29070 + 320, 18090.0)     # tokens, seconds (8 s 960x544, 6 steps)
 QWEN_REF = (4175, 232.0)            # tokens, seconds (1024^2, 8 steps, warm)
-# 832x480, 121 frames, first frame, 8-bit model on the internal SSD (2026-11-10)
-LTX_REF = (6240, 1027.0)
-REFS = {"h3": H3_REF, "qwen": QWEN_REF, "ltx": LTX_REF}
+REFS = {"h3": H3_REF, "qwen": QWEN_REF}
 
 lock = threading.Lock()
 current = {"proc": None, "job": None, "running": False}
@@ -113,19 +94,6 @@ def vpipe_bin():
         if Path(p).exists():
             return str(p)
     raise RuntimeError("找不到 vpipe 執行檔（可用環境變數 VPIPE_BIN 指定）")
-
-
-def ltx_plugin():
-    for p in LTX_PLUGIN_CANDIDATES:
-        if Path(p).exists():
-            return str(p)
-    return None
-
-
-def ltx_frames(seconds):
-    """Frames LTX-2.5 renders: 8k+1 (its VAE chunks time by 8), rounded up, at 24 fps."""
-    want = max(9, round(seconds * 24))
-    return 8 * math.ceil((want - 1) / 8) + 1
 
 
 def h3_frames(seconds):
@@ -165,12 +133,6 @@ def calibration(model):
 
 
 def estimate(model, w, h, seconds, steps=6):
-    if model == "ltx":
-        frames = ltx_frames(seconds)
-        tokens = ((frames - 1) // 8 + 1) * (h // 32) * (w // 32)
-        c, p = calibration("ltx")
-        return {"frames": frames, "real_seconds": round(frames / 24, 2),
-                "tokens": tokens, "eta_s": int(c * tokens ** p)}
     if model == "h3":
         frames = h3_frames(seconds)
         k = (frames - 5) // 17
@@ -544,13 +506,11 @@ def model_avail():
     return {
         "h3": (m / H3_MODEL).is_dir(),
         "qwen": (m / "Qwen" / "Qwen-Image-2.1-Turbo").is_dir(),
-        "ltx": (m / LTX_MODEL / "diffusion_models").is_dir() and ltx_plugin() is not None,
         # the folder appears as soon as quantizing starts; the DiT config is written last
         "ref2va": (m / REF2VA_MODEL / "diffusion_models" / "config.json").exists(),
         "turbo": (m / "larryvrh").is_dir(),
         "vdn": (m / "OpenVDN").is_dir(),
         "fast_vae": (m / "Efficient-Large-Model").is_dir(),
-        "ltx_upscale": ltx_upscaler_ok(),
         "ref2va_turbo": (m / "lightx2v").is_dir(),
         "pika_fl2va": pika.is_dir() and any(pika.glob("**/fl2va*")),
         "pika_ref2va": pika.is_dir() and any(pika.glob("**/ref2va*")),
@@ -658,34 +618,6 @@ def apply_extras(pipe, engine, vdn, fast_vae):
             s["config"]["linear_branch"] = VDN_BRANCH
         if fast_vae and s["type"] == "vae-decode":
             s["config"]["fast_decoder"] = FAST_VAE
-
-
-LTX_UPSCALER_DIR = WORK / "models" / "Lightricks" / "LTX-2.5"   # latent_upscale_models/ + vae/
-
-
-def ltx_upscaler_ok():
-    d = LTX_UPSCALER_DIR
-    return (d / "vae").exists() and any((d / "latent_upscale_models").glob("*spatial*x2*.safetensors"))
-
-
-def apply_ltx_upscale(pipe):
-    """Twice the picture in latent space (960x544 -> 1920x1088): one stage
-    between generate-video and vae-decode. The denoise is unchanged; the
-    decode runs over four times the pixels."""
-    if not ltx_upscaler_ok():
-        raise ValueError("還沒有 LTX 放大模型（models/Lightricks/LTX-2.5/latent_upscale_models）")
-    out, gen = [], None
-    for s in pipe["stages"]:
-        if s["type"] == "generate-video":
-            gen = s["id"]
-        if s["type"] == "vae-decode":
-            out.append({"id": "upscale", "type": "ltx-2.5-latent-upscale",
-                        "iports": [{"src": gen, "oport": 0}],
-                        "config": {"hf_dir": "./models/Lightricks/LTX-2.5", "mode": "spatial",
-                                   "unload_when_idle": "park"}})
-            s["iports"][0] = {"src": "upscale", "oport": 0}
-        out.append(s)
-    pipe["stages"] = out
 
 
 def set_video_bitrate(pipe, w, h):
@@ -810,36 +742,6 @@ def save_ref_video(job_id, data_url, start, w, h, frames, keep_audio):
     return rel
 
 
-def build_ltx(job_id, w, h, seconds, prompt, seed, first=None, audio=True):
-    """LTX-2.5 text-to-video, or image-to-video when a first frame is given
-    (the vpipe-ltx-2.5 plugin's graphs, merged). 8 steps are the checkpoint's."""
-    d = json.loads(LTX_TEMPLATE.read_text())
-    out = f"jobs/{job_id}/output.mp4"
-    mdir = f"./models/{LTX_MODEL}"
-    for s in d["stages"]:
-        c = s.setdefault("config", {})
-        if s["id"] == "model-select":
-            c["hf_dir"] = mdir
-        elif s["id"] == "text-prompt":
-            c["text"] = prompt
-        elif s["id"] == "gen":
-            c.update(width=w, height=h, frames=ltx_frames(seconds), seed=seed)
-        elif s["id"] == "save":
-            c.update(output_url=out, enable_audio=bool(audio))
-    if first:
-        d["stages"][1:1] = [
-            {"id": "load-image", "type": "load-image", "iports": [], "config": {"url": "./" + first}},
-            {"id": "vae-encode", "type": "vae-encode", "iports": [{"src": "load-image", "oport": 0}],
-             "config": {"hf_dir": mdir, "target_width": w, "target_height": h, "unload_when_idle": "always"}}]
-        for s in d["stages"]:
-            if s["id"] == "gen":
-                s["iports"][5] = {"src": "vae-encode", "oport": 0}   # ref_latent0: the clip starts AT it
-            elif s["id"] == "ltx-config":
-                s["config"]["ref_strength"] = 1.0
-    d["id"] = f"simple-{job_id}"
-    return d, out
-
-
 def build_pipeline(job_id, model, w, h, seconds, prompt, seed):
     if model == "h3":
         d = load_h3_template()
@@ -925,11 +827,6 @@ def _run_one(job, pipeline_path):
     try:
         with open(JOBS / job["id"] / "run.log", "w") as log:
             cmd = [vpipe_bin(), "--launch", str(pipeline_path)]
-            if job.get("model") == "ltx":
-                plug = ltx_plugin()
-                if not plug:
-                    raise RuntimeError("找不到 vpipe-ltx-2.5 外掛（可用 VPIPE_LTX_PLUGIN 指定）")
-                cmd[1:1] = ["--plugin", plug]
             proc = subprocess.Popen(
                 cmd,
                 cwd=WORK, stdout=log, stderr=subprocess.STDOUT,
@@ -1003,11 +900,6 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
     """Save the uploads and write the pipeline for one job (no lock held)."""
     images = body.get("images") or []
     first = last = None
-    if model == "ltx":
-        if images or body.get("last") or body.get("video"):
-            raise ValueError("LTX 目前只支援純文字或首幀（不支援尾幀、參考圖、參考影片）")
-        if not model_avail()["ltx"]:
-            raise ValueError("LTX-2.5 模型或外掛還沒裝好")
     if model in VIDEO_MODELS and body.get("first"):
         first = save_image(job_id, "first", body["first"])
     if model == "h3" and body.get("last"):
@@ -1023,10 +915,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
                                    h3_frames(seconds), bool(body.get("video_audio")))
         refs = refs + [ref_video]
         body["engine"] = "ref2va"   # clips are a trained input only on the Ref2VA partition
-    if model == "ltx":
-        pipe, out = build_ltx(job_id, w, h, seconds, prompt, seed, first,
-                              body.get("audio", True) is not False)
-    elif model == "qwen" and refs:
+    if model == "qwen" and refs:
         pipe, out = build_qwen_ref(job_id, refs, w, h, prompt, seed)
     elif model == "h3" and (refs or first or last):
         pipe, out = build_h3_conditioned(job_id, w, h, seconds, prompt, seed, first, last, refs)
@@ -1062,19 +951,15 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
             raise ValueError("這個 LoRA 是給 %s 訓練的，不能用在 %s 上" % (
                 {"qwen": "Qwen 圖片", "h3": "H3 影片"}[fam], {"qwen": "Qwen 圖片", "h3": "H3 影片"}[model]))
         apply_user_lora(pipe, user_lora, lora_scale)
-    if body.get("preview", True) and model != "ltx":   # no live preview for LTX yet
+    if body.get("preview", True):
         add_preview(pipe, model, job_id)
     audio = model in VIDEO_MODELS and body.get("audio", True) is not False
     if model == "h3" and not audio:
         for s in pipe["stages"]:
             if s["id"] == "save-video":
                 s["config"]["enable_audio"] = False
-    upscale = False
-    if model == "ltx" and body.get("upscale"):
-        apply_ltx_upscale(pipe)
-        upscale = True
     if model in VIDEO_MODELS:
-        set_video_bitrate(pipe, w * (2 if upscale else 1), h * (2 if upscale else 1))
+        set_video_bitrate(pipe, w, h)
     pipe_path = JOBS / job_id / "pipeline.vpipeline"
     pipe_path.write_text(json.dumps(pipe, ensure_ascii=False, indent=2))
     job = {"id": job_id, "model": model, "size": size_key,
@@ -1082,12 +967,11 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "prompt": prompt, "output": out, "state": "queued",
            "queued_at": time.time(), "draft": bool(body.get("draft")), "refs": refs, "first": first, "last": last,
            "audio": audio, "bgm": bool(body.get("bgm")),
-           "steps": steps, "turbo": turbo if model != "ltx" else None, "accel": accel if model == "h3" else None,
+           "steps": steps, "turbo": turbo, "accel": accel if model == "h3" else None,
            "ane": ANE_ON if model == "h3" else None,
            "lora": user_lora, "lora_scale": lora_scale if user_lora else None,
            "vdn": bool(body.get("vdn")) if model == "h3" else None,
            "fast_vae": bool(body.get("fast_vae")) if model == "h3" else None,
-           "upscale": upscale if model == "ltx" else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
            **estimate(model, w, h, seconds, steps)}
@@ -1348,24 +1232,6 @@ ACTING: unless the user's draft asks for big emotion, keep the performance calm 
 - Prefer a medium close-up or closer so the face is large in the frame: a small face loses detail and drifts.
 """
 
-# Added when the target model is LTX-2.5 (smaller and faster than H3, weaker at fine anatomy).
-LTX_ASSIST_RULES = """
-TARGET MODEL: LTX-2.5, not MiniMax H3. These override the PROMPT rules above where they differ:
-- Write ONE flowing paragraph in the present tense, in the order things happen: shot type and framing first,
-  then the place and light, then the person as they look, then the action, then the sound. No "Timeline:" and
-  no "[0s-1s]" brackets - say "then" and "after that" instead.
-- ONE simple, slow, continuous action for the whole clip (a look up and a smile, a small nod, a sip). LTX-2.5
-  breaks on several actions in a few seconds. If the draft asks for more, keep the most important one and say
-  in the notes what you dropped.
-- Hands: keep them still, resting on the table or holding one object the whole time. Leave out page turning,
-  finger gestures, waving and anything where fingers cross or change grip, unless the user insists.
-- Face: keep it large in frame; the mouth is gently closed whenever the person is not speaking; a small,
-  natural smile rather than a wide laugh.
-- The body stays in the pose of the first frame; only the head, eyes and one small movement change.
-- End with one sentence about the ambient sound.
-- SECONDS: still fit the lines, and prefer 3-5.
-"""
-
 IMAGE_ASSIST_RULES = """You turn a rough picture idea (often written in Chinese) into a prompt for
 Qwen Image 2.1 Turbo, a photo model that runs on the user's laptop. Reply with JSON only.
 
@@ -1461,8 +1327,6 @@ def assist(body):
             if body.get("frames") and imgs:
                 lines.insert(1, FRAME_ASSIST_RULES)
             lines.insert(1, ACTING_ASSIST_RULES)
-            if body.get("model") == "ltx":
-                lines.insert(1, LTX_ASSIST_RULES)
             if roles:
                 lines.append("Reference pictures attached, in order: " +
                              "; ".join(f"Picture {i + 1} = {r}" for i, r in enumerate(roles)))
