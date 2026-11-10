@@ -252,6 +252,10 @@
         <label class="fld"><span>LoRA 強度</span><input type="number" id="loraScale" min="0.1" max="2" step="0.1" value="1"></label>
       </div>
       <div class="hint" id="loraHint" hidden></div>
+      <div class="fields" id="fastRow">
+        <label class="tg sm"><input type="checkbox" id="fastVae"> 快速解碼（約省 5 分鐘）</label>
+        <label class="tg sm"><input type="checkbox" id="vdnOn"> VDN 加速（約省 2 分鐘）</label>
+      </div>
       <div class="fld wide" id="secRow"><span>秒數 <b id="secVal">3</b> 秒</span>
         <input type="range" id="seconds" min="1" max="10" step="1" value="3"></div>
     </div>
@@ -415,6 +419,14 @@ function fmt(s) {
   return h ? `${h} 小時 ${m} 分` : m ? `${m} 分 ${sec} 秒` : `${sec} 秒`;
 }
 
+function syncFast() {
+  $("#fastRow").hidden = model !== "h3";
+  { const av = cfg.avail || {};
+    $("#fastVae").disabled = !av.fast_vae; if (!av.fast_vae) $("#fastVae").checked = false;
+    // VDN only exists for the text / first-last-frame model, not for references
+    const vdnOk = av.vdn && vmode !== "refs";
+    $("#vdnOn").disabled = !vdnOk; if (!vdnOk) $("#vdnOn").checked = false; }
+}
 function renderSizes() {
   const box = $("#size");
   const sizes = cfg.sizes[model];
@@ -427,8 +439,10 @@ function renderSizes() {
   $("#audRow").hidden = !isVid(model);
   $("#stepRow").hidden = model !== "h3";
   $("#stepRow2").hidden = model !== "h3";
-  $("#loraRow").hidden = model !== "h3";
-  $("#loraHint").hidden = model !== "h3";
+  syncFast();
+  $("#loraRow").hidden = model !== "h3" && model !== "qwen";
+  $("#loraHint").hidden = model !== "h3" && model !== "qwen";
+  renderLoras();
   $("#dlgRow").hidden = !isVid(model);
   $("#draftRow").hidden = !isVid(model);
   // LTX here: plain text or a first frame only (no last frame, no references yet)
@@ -484,15 +498,22 @@ function syncAccelForEngine() {
   }
 }
 function renderLoras() {
-  const sel = $("#lora"), keep = sel.value, list = cfg.loras || [];
+  // a LoRA only fits the model it was trained on: list the ones for this model
+  const info = cfg.lora_info || {}, fam = model === "qwen" ? "qwen" : "h3";
+  const sel = $("#lora"), keep = sel.value;
+  const list = (cfg.loras || []).filter(n => !(info[n] || {}).family || info[n].family === fam);
   sel.innerHTML = '<option value="">不使用</option>' + list.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n.replace(/\.safetensors$/, ""))}</option>`).join("");
   sel.value = list.includes(keep) ? keep : "";
   $("#loraScale").disabled = !sel.value;
-  $("#loraHint").textContent = list.length
-    ? "自己訓練的 H3 LoRA，會和加速一起掛上。prompt 裡要寫訓練時的觸發詞。"
-    : `把 H3 的 LoRA（.safetensors）放進 ${cfg.lora_dir || "~/vpipe-work/models/lora"}，重新整理頁面就會出現在這裡。`;
+  const trig = sel.value && (info[sel.value] || {}).trigger;
+  const name = fam === "qwen" ? "Qwen" : "H3";
+  $("#loraHint").textContent = trig
+    ? `prompt 裡要寫觸發詞「${trig}」，LoRA 才會起作用。`
+    : list.length
+      ? `自己訓練的 ${name} LoRA。prompt 裡要寫訓練時的觸發詞。`
+      : `把 ${name} 的 LoRA（.safetensors）放進 ${cfg.lora_dir || "~/vpipe-work/models/lora"}，重新整理頁面就會出現在這裡。`;
 }
-$("#lora").onchange = () => { $("#loraScale").disabled = !$("#lora").value; };
+$("#lora").onchange = renderLoras;
 function applyAvail() {
   renderLoras();
   const a = cfg.avail || {};
@@ -638,7 +659,7 @@ $("#vmode").onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   vmode = b.dataset.v;
   document.querySelectorAll("#vmode button").forEach(x => x.classList.toggle("on", x === b));
-  renderSlots(); updateEst();
+  renderSlots(); syncFast(); updateEst();
 };
 function h3Extras() {
   if (!isVid(model)) return {};
@@ -734,8 +755,9 @@ $("#run").onclick = async () => {
   const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
   const body = { model, size, seconds: +$("#seconds").value, prompt,
                  audio: isVid(model) ? $("#audioOn").checked : true,
-                 lora: model === "h3" ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
+                 lora: (model === "h3" || model === "qwen") ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
                  steps: effSteps(), accel, engine, draft: isDraft(),
+                 fast_vae: model === "h3" && $("#fastVae").checked, vdn: model === "h3" && $("#vdnOn").checked,
                  bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
                  images: model === "qwen" ? refImages : (x.images || []),
@@ -986,7 +1008,8 @@ async function aiImage() {
   const t0 = Date.now();
   const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
   try {
-    const body = { mode: "image", prompt: $("#prompt").value, size, images: refImages || [] };
+    const body = { mode: "image", prompt: $("#prompt").value, size, images: refImages || [],
+                   trigger: ((cfg.lora_info || {})[$("#lora").value] || {}).trigger || "" };
     const r = await fetch("/api/assist", { method: "POST", body: JSON.stringify({ ...body, ui_lang: LANG }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || "失敗");

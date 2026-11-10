@@ -677,12 +677,43 @@ def apply_user_lora(pipe, name, scale):
     if not (0.1 <= scale <= 2.0):
         raise ValueError("LoRA 強度要在 0.1–2.0 之間")
     for s in pipe["stages"]:
-        if s["id"] == "minimax-h3-model-config":
+        if s["id"] in ("minimax-h3-model-config", "qwen-image-21-model-config"):
             slot = "lora2" if s["config"].get("lora") else "lora"
             s["config"][slot] = str(LORA_DIR / name)
             s["config"][slot + "_scale"] = scale
             return
     raise ValueError("這個流程不能掛 LoRA")
+
+
+def lora_family(name):
+    """'qwen' / 'h3' / '' from the file's own header: a LoRA only fits the
+    model it was trained on, and vpipe skips one that does not fit silently."""
+    import struct
+    try:
+        with open(LORA_DIR / name, "rb") as fh:
+            n = struct.unpack("<Q", fh.read(8))[0]
+            if n > 50_000_000:
+                return ""
+            meta = json.loads(fh.read(n)).get("__metadata__") or {}
+    except (OSError, ValueError, struct.error):
+        return ""
+    blob = " ".join(str(v) for v in meta.values()).lower() + " " + name.lower()
+    if "qwen" in blob:
+        return "qwen"
+    if "minimax" in blob or "h3" in blob:
+        return "h3"
+    return ""
+
+
+def lora_trigger(name):
+    import struct
+    try:
+        with open(LORA_DIR / name, "rb") as fh:
+            n = struct.unpack("<Q", fh.read(8))[0]
+            meta = json.loads(fh.read(n)).get("__metadata__") or {}
+    except (OSError, ValueError, struct.error):
+        return ""
+    return str(meta.get("vpipe.trigger_word") or meta.get("modelspec.trigger_phrase") or "")
 
 
 def _image_ext(raw):
@@ -976,18 +1007,22 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         steps = apply_accel(pipe, accel, engine, steps)
         apply_ane(pipe)
         apply_extras(pipe, engine, bool(body.get("vdn")), bool(body.get("fast_vae")))
-        if body.get("lora"):
-            user_lora = str(body["lora"])
-            try:
-                lora_scale = float(body.get("lora_scale") or 1.0)
-            except (TypeError, ValueError):
-                raise ValueError("LoRA 強度要在 0.1–2.0 之間")
-            apply_user_lora(pipe, user_lora, lora_scale)
         if ref_video:
             for st_ in pipe["stages"]:
                 if st_["id"] == "video-ref-encoder":
                     st_["config"]["reference_video_short_edge"] = 0
         turbo = accel != "none"
+    if model in ("h3", "qwen") and body.get("lora"):
+        user_lora = str(body["lora"])
+        try:
+            lora_scale = float(body.get("lora_scale") or 1.0)
+        except (TypeError, ValueError):
+            raise ValueError("LoRA 強度要在 0.1–2.0 之間")
+        fam = lora_family(user_lora)
+        if fam and fam != model:
+            raise ValueError("這個 LoRA 是給 %s 訓練的，不能用在 %s 上" % (
+                {"qwen": "Qwen 圖片", "h3": "H3 影片"}[fam], {"qwen": "Qwen 圖片", "h3": "H3 影片"}[model]))
+        apply_user_lora(pipe, user_lora, lora_scale)
     if body.get("preview", True) and model != "ltx":   # no live preview for LTX yet
         add_preview(pipe, model, job_id)
     audio = model in VIDEO_MODELS and body.get("audio", True) is not False
@@ -1257,6 +1292,16 @@ KEYFRAMES: the attached picture(s) are the video's own first / last frame, not l
 - The action starts from the pose in the first frame and stays physically close to it.
 """
 
+# Always added for video: both models overact a talking face unless told otherwise.
+ACTING_ASSIST_RULES = """
+ACTING: unless the user's draft asks for big emotion, keep the performance calm and natural.
+- A relaxed face and a soft, small smile. No wide open-mouth laugh, no raised eyebrows, no exaggerated
+  surprise, no head tilting from side to side.
+- When speaking: small, natural mouth movements, steady eye contact, the head almost still, at most one
+  slight nod. Between lines the lips rest gently closed.
+- Prefer a medium close-up or closer so the face is large in the frame: a small face loses detail and drifts.
+"""
+
 # Added when the target model is LTX-2.5 (smaller and faster than H3, weaker at fine anatomy).
 LTX_ASSIST_RULES = """
 TARGET MODEL: LTX-2.5, not MiniMax H3. These override the PROMPT rules above where they differ:
@@ -1369,6 +1414,7 @@ def assist(body):
                      f"Sound: {'OFF (silent video, no dialogue)' if body.get('audio') is False else 'background music too' if body.get('bgm') else 'ambient sound and dialogue only'}"]
             if body.get("frames") and imgs:
                 lines.insert(1, FRAME_ASSIST_RULES)
+            lines.insert(1, ACTING_ASSIST_RULES)
             if body.get("model") == "ltx":
                 lines.insert(1, LTX_ASSIST_RULES)
             if roles:
@@ -1376,6 +1422,11 @@ def assist(body):
                              "; ".join(f"Picture {i + 1} = {r}" for i, r in enumerate(roles)))
             else:
                 lines.append("No reference pictures: describe every person in words.")
+        trig = re.sub(r"[^A-Za-z0-9_-]", "", str(body.get("trigger") or ""))[:40]
+        if image_mode and trig:
+            lines.append(f'A character LoRA is loaded. Its trigger word is "{trig}": name the main person '
+                         f'with it once, as in "{trig}, a young woman ...", and keep the rest of the '
+                         "description short so the LoRA decides the face.")
         if body.get("ui_lang") == "en":
             lines.append("The user reads English: write notes_zh in English, not Chinese.")
         cmd = [str(CODEX), "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
@@ -1621,7 +1672,7 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/config":
             sizes = {m: {k: list(v) for k, v in s.items()} for m, s in SIZES.items()}
             avail = model_avail()
-            return self._json({"sizes": sizes, "avail": avail, "loras": list_loras(),
+            return self._json({"sizes": sizes, "avail": avail, "loras": list_loras(), "lora_info": {n: {"family": lora_family(n), "trigger": lora_trigger(n)} for n in list_loras()},
                                "lora_dir": str(LORA_DIR).replace(str(Path.home()), "~")})
         if p == "/api/estimate":
             q = {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
