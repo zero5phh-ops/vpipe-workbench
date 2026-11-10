@@ -1234,7 +1234,7 @@ function showPreview(j) {
   }
   if (p.url === lastPv) return;
   lastPv = p.url;
-  const tag = `<span class="pvtag">預覽 · 第 ${p.step ?? "?"} 步（低解析度草稿）</span>`;
+  const tag = `<span class="pvtag">預覽 · 第 ${p.step ?? "?"} 步（低解析度草稿，沒有聲音；跑完後在下方「歷史紀錄」播放才有聲音）</span>`;
   box.innerHTML = p.kind === "video"
     ? `<video src="${p.url}" autoplay loop muted playsinline></video>${tag}`
     : `<img src="${p.url}">${tag}`;

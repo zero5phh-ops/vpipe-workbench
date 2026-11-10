@@ -115,7 +115,7 @@ const EN_PATTERNS = [
   [/^約 (.+)$/, (m, t) => "≈ " + tr(t)], [/^用時 (.+)$/, (m, t) => "took " + tr(t)],
   [/^生成中：(.+)$/, (m, t) => "Generating: " + tr(t)],
   [/^AI 改寫中… (\d+) 秒$/, "AI rewriting… $1 s"], [/^完成（(\d+) 秒）$/, "Done ($1 s)"],
-  [/^預覽 · 第 (.+) 步（低解析度草稿）$/, "Preview · step $1 (low-res draft)"],
+  [/^預覽 · 第 (.+) 步（低解析度草稿，沒有聲音；跑完後在下方「歷史紀錄」播放才有聲音）$/, "Preview · step $1 (low-res draft, silent; the finished clip in History below has sound)"],
   [/^人物 (\d+)$/, "Person $1"], [/^物品 (\d+)$/, "Object $1"], [/^參考圖 (\d+)$/, "Picture $1"], [/^參(\d+)$/, "Ref $1"],
   [/^把 (H3|Qwen) 的 LoRA（\.safetensors）放進 (.+)，重新整理頁面就會出現在這裡。$/, "Put your $1 LoRA (.safetensors) in $2, then reload the page and it appears here."],
   [/^自己訓練的 (H3|Qwen) LoRA。prompt 裡要寫訓練時的觸發詞。$/, "Your own $1 LoRA. Put its trigger word in the prompt."],
