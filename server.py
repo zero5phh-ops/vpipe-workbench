@@ -548,6 +548,8 @@ def model_avail():
         # the folder appears as soon as quantizing starts; the DiT config is written last
         "ref2va": (m / REF2VA_MODEL / "diffusion_models" / "config.json").exists(),
         "turbo": (m / "larryvrh").is_dir(),
+        "vdn": (m / "OpenVDN").is_dir(),
+        "fast_vae": (m / "Efficient-Large-Model").is_dir(),
         "ref2va_turbo": (m / "lightx2v").is_dir(),
         "pika_fl2va": pika.is_dir() and any(pika.glob("**/fl2va*")),
         "pika_ref2va": pika.is_dir() and any(pika.glob("**/ref2va*")),
@@ -632,6 +634,29 @@ def apply_accel(pipe, accel, engine, steps):
             dc["iports"][3] = {"src": "first-frame", "oport": 0}
     st["generate-video"]["config"]["steps"] = steps
     return steps
+
+
+VDN_BRANCH = "OpenVDN/vdn-minimax-h3-stage-dmd"                    # linear-attention branch, FL2VA only
+FAST_VAE = "Efficient-Large-Model/Open-H3-Regenerate-2K-fast-vae"  # the Regenerate-2K release's fast decoder
+
+
+def apply_extras(pipe, engine, vdn, fast_vae):
+    """Two opt-in H3 speed-ups that need extra weights: the VDN hybrid
+    attention (cost linear in clip length; pays on long / large clips) and
+    the fast video decoder. Both change the picture slightly."""
+    a = model_avail()
+    if vdn:
+        if engine != "fl2va":
+            raise ValueError("VDN 只支援 FL2VA（不能和參考圖 Ref2VA 一起用）")
+        if not a["vdn"]:
+            raise ValueError("VDN 還沒下載")
+    if fast_vae and not a["fast_vae"]:
+        raise ValueError("快速解碼器還沒下載")
+    for s in pipe["stages"]:
+        if vdn and s["id"] == "minimax-h3-model-config":
+            s["config"]["linear_branch"] = VDN_BRANCH
+        if fast_vae and s["type"] == "vae-decode":
+            s["config"]["fast_decoder"] = FAST_VAE
 
 
 LORA_DIR = WORK / "models" / "lora"   # drop your own H3 .safetensors LoRAs here
@@ -950,6 +975,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         check_weights("pika" if engine == "ref2va" else accel, engine)
         steps = apply_accel(pipe, accel, engine, steps)
         apply_ane(pipe)
+        apply_extras(pipe, engine, bool(body.get("vdn")), bool(body.get("fast_vae")))
         if body.get("lora"):
             user_lora = str(body["lora"])
             try:
@@ -979,6 +1005,8 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "steps": steps, "turbo": turbo if model != "ltx" else None, "accel": accel if model == "h3" else None,
            "ane": ANE_ON if model == "h3" else None,
            "lora": user_lora, "lora_scale": lora_scale if user_lora else None,
+           "vdn": bool(body.get("vdn")) if model == "h3" else None,
+           "fast_vae": bool(body.get("fast_vae")) if model == "h3" else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
            **estimate(model, w, h, seconds, steps)}
@@ -1219,6 +1247,34 @@ never much longer, because every extra second is far slower to render on this la
 NOTES (field "notes_zh"): 2-4 short sentences in Traditional Chinese for the user: what you changed and why,
 and anything they should check (e.g. a second person has no reference picture so his face is invented).
 """
+# Added to ASSIST_RULES when a picture IS the video's first / last frame.
+FRAME_ASSIST_RULES = """
+KEYFRAMES: the attached picture(s) are the video's own first / last frame, not loose references.
+- Describe the place, the light, the person, their hair and their clothes EXACTLY as seen in the picture.
+  Never invent a different location, hairstyle, outfit or age: text that contradicts the frame makes the
+  model morph the person. Call them by a plain name that fits what is seen ("the woman", "the barista").
+- Keep the framing and the camera position of the picture; at most one slow simple camera move.
+- The action starts from the pose in the first frame and stays physically close to it.
+"""
+
+# Added when the target model is LTX-2.5 (smaller and faster than H3, weaker at fine anatomy).
+LTX_ASSIST_RULES = """
+TARGET MODEL: LTX-2.5, not MiniMax H3. These override the PROMPT rules above where they differ:
+- Write ONE flowing paragraph in the present tense, in the order things happen: shot type and framing first,
+  then the place and light, then the person as they look, then the action, then the sound. No "Timeline:" and
+  no "[0s-1s]" brackets - say "then" and "after that" instead.
+- ONE simple, slow, continuous action for the whole clip (a look up and a smile, a small nod, a sip). LTX-2.5
+  breaks on several actions in a few seconds. If the draft asks for more, keep the most important one and say
+  in the notes what you dropped.
+- Hands: keep them still, resting on the table or holding one object the whole time. Leave out page turning,
+  finger gestures, waving and anything where fingers cross or change grip, unless the user insists.
+- Face: keep it large in frame; the mouth is gently closed whenever the person is not speaking; a small,
+  natural smile rather than a wide laugh.
+- The body stays in the pose of the first frame; only the head, eyes and one small movement change.
+- End with one sentence about the ambient sound.
+- SECONDS: still fit the lines, and prefer 3-5.
+"""
+
 IMAGE_ASSIST_RULES = """You turn a rough picture idea (often written in Chinese) into a prompt for
 Qwen Image 2.1 Turbo, a photo model that runs on the user's laptop. Reply with JSON only.
 
@@ -1311,6 +1367,10 @@ def assist(body):
                      f"Frame: {body.get('size') or '9:16'} ({'vertical' if '9:16' in str(body.get('size')) else 'as given'})",
                      f"Length they set: {body.get('seconds')} s",
                      f"Sound: {'OFF (silent video, no dialogue)' if body.get('audio') is False else 'background music too' if body.get('bgm') else 'ambient sound and dialogue only'}"]
+            if body.get("frames") and imgs:
+                lines.insert(1, FRAME_ASSIST_RULES)
+            if body.get("model") == "ltx":
+                lines.insert(1, LTX_ASSIST_RULES)
             if roles:
                 lines.append("Reference pictures attached, in order: " +
                              "; ".join(f"Picture {i + 1} = {r}" for i, r in enumerate(roles)))

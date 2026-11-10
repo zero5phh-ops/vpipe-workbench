@@ -884,11 +884,26 @@ function sayPrefix(sp) {
 const CLEAN_TEXT = "The lines are heard as speech only; the picture shows just the scene and the people.";
 const CLEAN_NOTE_FN = () => $("#wantSubs").checked ? "" : CLEAN_TEXT;
 
+const LTX_LANG = { Chinese: "Mandarin Chinese", English: "English", Malay: "Malay", Japanese: "Japanese",
+                   Manglish: "English with a casual Malaysian accent" };
+function ltxDialogueNote(lines, lang) {
+  // LTX-2.5 reads speech as plain sentences with the words in quotes. H3's
+  // <d>[Lang]…</d> tags mean nothing to it and come out as garbled on-screen text.
+  const said = lines.map(splitSpeaker).map(sp => {
+    const l = lang === "MYmix" ? myLineLang(sp.text) : { lang, text: sp.text.replace(/^[中馬马英][:：]\s*/, "") };
+    const who = sp.speaker || "The person";
+    const how = sp.acts.length ? `, ${sp.acts.join(", ")},` : "";
+    return `${who}${how} says in ${LTX_LANG[l.lang] || l.lang}: "${l.text}"`;
+  });
+  return said.join(" Then ") + " Each line is spoken once, clearly, with the lips moving in sync, and the speaker's mouth rests closed when the line is over."
+    + ($("#wantSubs").checked ? "" : " The speech is only heard; the frame stays clean, with no subtitles, captions or on-screen text.");
+}
 function dialogueNote() {
   if (!isVid(model)) return "";
   const lines = $("#dialogue").value.split("\n").map(x => x.trim()).filter(Boolean);
   if (!lines.length) return "";
   const lang = $("#dlgLang").value;
+  if (model === "ltx") return ltxDialogueNote(lines, lang);
   const head = "Dialogue, each line is spoken only once, in this order: ";
   const sps = lines.map(splitSpeaker);
   const named = sps.some(sp => sp.speaker);
@@ -931,10 +946,16 @@ let aiBefore = null;
 $("#aiGo").onclick = async () => {
   if (model === "qwen") return aiImage();
   const x = h3Extras();
-  const roles = [...(x.roleNote || "").matchAll(/<Picture \d+> is (.+?)\./g)].map(m => m[1]);
+  let roles = [...(x.roleNote || "").matchAll(/<Picture \d+> is (.+?)\./g)].map(m => m[1]);
+  let images = x.images || [];
+  if (vmode === "frames" && (x.first || x.last)) {   // the helper must SEE the keyframes, or it invents another person and place
+    images = [x.first, x.last].filter(Boolean);
+    roles = [x.first && "the FIRST FRAME of the video (the clip starts from exactly this picture)",
+             x.last && "the LAST FRAME of the video (the clip ends on exactly this picture)"].filter(Boolean);
+  }
   const body = { prompt: $("#prompt").value, dialogue: $("#dialogue").value, lang: $("#dlgLang").value,
                  seconds: +$("#seconds").value, size, bgm: $("#bgmOn").checked, audio: $("#audioOn").checked,
-                 images: x.images || [], roles };
+                 images, roles, model, frames: vmode === "frames" };
   $("#aiGo").disabled = true; $("#aiNote").hidden = true;
   const t0 = Date.now();
   const tick = setInterval(() => { $("#aiStatus").textContent = `AI 改寫中… ${Math.round((Date.now() - t0) / 1000)} 秒`; }, 500);
