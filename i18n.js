@@ -12,6 +12,8 @@ const EN = {
   "在這台 Mac 本機生成 · 可排隊，一次跑一個 · 結果存在 ~/vpipe-work/jobs/": "Generated locally on this Mac · jobs queue up, one runs at a time · results are saved in ~/vpipe-work/jobs/",
   "影片＋聲音": "video + sound", "圖片": "image", "影片": "video",
   "快速影片＋聲音": "fast video + sound", "請放一張首幀": "Add a first frame",
+  "放人物／場景／物品的照片，H3 會用 Ref2VA 模型把它們用進影片（加速固定用 Pika，6 步）。不能和首尾幀同時用。prompt 裡直接描述他們在做什麼即可。": "Add photos of people, a scene or objects; H3 uses them through its Ref2VA model (speed-up fixed to Pika, 6 steps). Not together with first / last frames. Just describe what they do in the prompt.",
+  "Ref2VA 或它的 Pika 加速還沒裝好": "Ref2VA or its Pika speed-up is not installed",
   "人物 LoRA": "Character LoRA", "LoRA 強度": "LoRA strength", "不使用": "None",
   "自己訓練的 H3 LoRA，會和加速一起掛上。prompt 裡要寫訓練時的觸發詞。": "Your own H3 LoRA, loaded beside the speed-up. Put its trigger word in the prompt.",
   "找不到這個 LoRA 檔（放在 models/lora 資料夾裡的 .safetensors）": "LoRA file not found (a .safetensors in the models/lora folder)",

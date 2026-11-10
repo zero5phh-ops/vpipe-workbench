@@ -268,10 +268,6 @@
         <div class="slot" data-k="first"><span>首幀</span></div>
         <div class="slot" data-k="last"><span>尾幀</span></div>
       </div>
-      <div id="vEngine" class="seg sm" hidden style="margin-top:10px">
-        <button data-v="like" class="on">零樣本（FL2VA）</button>
-        <button data-v="ref2va">正式 Ref2VA</button>
-      </div>
       <div id="vRefs" hidden>
         <div class="refgroup"><div class="rgh">人物 <small>最多 5 位</small></div><div class="slots" data-g="person"></div></div>
         <div class="refgroup"><div class="rgh">場景 <small>1 張</small></div><div class="slots" data-g="scene"></div></div>
@@ -450,7 +446,8 @@ function renderSizes() {
 // H3 steps (4/6/8) and the Turbo LoRA. Time scales almost linearly with steps.
 let steps = 6;
 // Speed-up adapter and the step count it really runs.
-let accel = "turbo", engine = "like";
+let accel = "turbo";
+const engine = "ref2va";   // reference images always run on the Ref2VA model (the zero-shot FL2VA route was removed)
 function lockedSteps() {
   if (accel === "pika") return 6;                                   // Pika's manifest fixes 6
   return null;
@@ -469,13 +466,6 @@ function stepHint() {
 function effSteps() { return lockedSteps() ?? steps; }
 function setAccel(v) { accel = v; $("#accel").value = v; stepHint(); updateEst(); }
 $("#accel").onchange = () => setAccel($("#accel").value);
-$("#vEngine").onclick = e => {
-  const b = e.target.closest("button"); if (!b || b.disabled) return;
-  engine = b.dataset.v;
-  document.querySelectorAll("#vEngine button").forEach(x => x.classList.toggle("on", x === b));
-  syncAccelForEngine();
-  stepHint(); updateEst();
-};
 // Ref2VA's only speed-up here is Pika (lightx2v was removed): grey out Turbo there.
 let accelBeforeRef2va = null;
 function syncAccelForEngine() {
@@ -513,9 +503,10 @@ function applyAvail() {
   pb.disabled = !pikaOk; pb.textContent = pikaOk ? "Pika Flex" : "Pika Flex（未下載）";
   const tb = document.querySelector('#accel option[value="turbo"]');
   if (a.turbo === false) tb.textContent = "Turbo（未下載）";
-  const rb = document.querySelector('#vEngine [data-v="ref2va"]');
+  const rb = document.querySelector('#vmode [data-v="refs"]');
   const r2ok = a.ref2va && a.pika_ref2va;
   rb.disabled = !r2ok; rb.title = r2ok ? "" : "Ref2VA 或它的 Pika 加速還沒裝好";
+  if (!r2ok && vmode === "refs") selectVmode("text");
   syncAccelForEngine();
 }
 $("#steps").onchange = () => { steps = +$("#steps").value; stepHint(); updateEst(); };
@@ -544,12 +535,11 @@ const slotImg = {};   // key -> data URL
 const VHINT = {
   text: "只用文字描述生成影片。",
   frames: "放首幀＝影片從這張圖開始動；放尾幀＝影片結束在這張圖；兩張都放＝從 A 動到 B。圖會依所選大小裁切，建議用跟影片同比例的圖。",
-  refs: "放人物／場景／物品的照片，H3 會把它們用進影片（零樣本模式，像不像要看運氣，多換幾個 seed 試）。不能和首尾幀同時用。prompt 裡直接描述他們在做什麼即可。"
+  refs: "放人物／場景／物品的照片，H3 會用 Ref2VA 模型把它們用進影片（加速固定用 Pika，6 步）。不能和首尾幀同時用。prompt 裡直接描述他們在做什麼即可。"
 };
 function renderSlots() {
   $("#vFrames").hidden = vmode !== "frames";
   $("#vRefs").hidden = vmode !== "refs";
-  $("#vEngine").hidden = vmode !== "refs";
   syncAccelForEngine();
   stepHint();
   renderRefGroups();
@@ -604,9 +594,6 @@ $("#vidSlot").onclick = () => {
     const r = new FileReader();
     r.onload = () => {
       refVideo = { data: r.result, url: URL.createObjectURL(f) };
-      // clips only work on the real Ref2VA partition
-      const rb = document.querySelector('#vEngine [data-v="ref2va"]');
-      if (rb && !rb.disabled && engine !== "ref2va") rb.click();
       renderVideoSlot(); updateEst();
     };
     r.readAsDataURL(f);
@@ -743,13 +730,12 @@ $("#run").onclick = async () => {
   if (model === "h3" && vmode === "frames" && !x.first && !x.last) { $("#err").textContent = "請放至少一張首幀或尾幀"; return; }
   if (model === "ltx" && vmode === "frames" && !x.first) { $("#err").textContent = "請放一張首幀"; return; }
   if (model === "h3" && vmode === "refs" && !x.images) { $("#err").textContent = "請放至少一張參考圖或一段影片"; return; }
-  if (x.video && engine !== "ref2va") { $("#err").textContent = "動作影片要用「正式 Ref2VA」"; return; }
   if (model === "h3" && vmode === "refs" && x.images.length > REF_TOTAL) { $("#err").textContent = `參考圖最多 ${REF_TOTAL} 張，目前 ${x.images.length} 張`; return; }
   const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
   const body = { model, size, seconds: +$("#seconds").value, prompt,
                  audio: isVid(model) ? $("#audioOn").checked : true,
                  lora: model === "h3" ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
-                 steps: effSteps(), accel, engine: engine === "ref2va" ? "ref2va" : "like", draft: isDraft(),
+                 steps: effSteps(), accel, engine, draft: isDraft(),
                  bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
                  images: model === "qwen" ? refImages : (x.images || []),

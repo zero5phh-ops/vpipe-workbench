@@ -946,7 +946,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         accel = body.get("accel") or ("turbo" if body.get("turbo", True) is not False else "none")
         if accel not in ACCELS:
             raise ValueError("未知的加速方式")
-        engine = "ref2va" if (refs and body.get("engine") == "ref2va") else "fl2va"
+        engine = "ref2va" if refs else "fl2va"   # references always run on Ref2VA
         check_weights("pika" if engine == "ref2va" else accel, engine)
         steps = apply_accel(pipe, accel, engine, steps)
         apply_ane(pipe)
