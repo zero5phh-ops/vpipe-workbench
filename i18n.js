@@ -15,6 +15,7 @@ const EN = {
   "放人物／場景／物品的照片，H3 會用 Ref2VA 模型把它們用進影片（加速固定用 Pika，6 步）。不能和首尾幀同時用。prompt 裡直接描述他們在做什麼即可。": "Add photos of people, a scene or objects; H3 uses them through its Ref2VA model (speed-up fixed to Pika, 6 steps). Not together with first / last frames. Just describe what they do in the prompt.",
   "Ref2VA 或它的 Pika 加速還沒裝好": "Ref2VA or its Pika speed-up is not installed",
   "人物 LoRA": "Character LoRA", "LoRA 強度": "LoRA strength", "不使用": "None",
+  "2 倍放大（輸出寬高各 ×2，多約 6 分鐘）": "2× upscale (twice the width and height, about 6 min more)",
   "快速解碼（約省 5 分鐘）": "Fast decode (saves about 5 min)",
   "VDN 加速（約省 2 分鐘）": "VDN speed-up (saves about 2 min)",
   "自己訓練的 H3 LoRA，會和加速一起掛上。prompt 裡要寫訓練時的觸發詞。": "Your own H3 LoRA, loaded beside the speed-up. Put its trigger word in the prompt.",

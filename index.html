@@ -252,6 +252,9 @@
         <label class="fld"><span>LoRA 強度</span><input type="number" id="loraScale" min="0.1" max="2" step="0.1" value="1"></label>
       </div>
       <div class="hint" id="loraHint" hidden></div>
+      <div class="fields" id="upRow" hidden>
+        <label class="tg sm"><input type="checkbox" id="ltxUp"> 2 倍放大（輸出寬高各 ×2，多約 6 分鐘）</label>
+      </div>
       <div class="fields" id="fastRow">
         <label class="tg sm"><input type="checkbox" id="fastVae"> 快速解碼（約省 5 分鐘）</label>
         <label class="tg sm"><input type="checkbox" id="vdnOn"> VDN 加速（約省 2 分鐘）</label>
@@ -420,6 +423,8 @@ function fmt(s) {
 }
 
 function syncFast() {
+  $("#upRow").hidden = model !== "ltx";
+  { const ok = (cfg.avail || {}).ltx_upscale; $("#ltxUp").disabled = !ok; if (!ok) $("#ltxUp").checked = false; }
   $("#fastRow").hidden = model !== "h3";
   { const av = cfg.avail || {};
     $("#fastVae").disabled = !av.fast_vae; if (!av.fast_vae) $("#fastVae").checked = false;
@@ -757,7 +762,7 @@ $("#run").onclick = async () => {
                  audio: isVid(model) ? $("#audioOn").checked : true,
                  lora: (model === "h3" || model === "qwen") ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
                  steps: effSteps(), accel, engine, draft: isDraft(),
-                 fast_vae: model === "h3" && $("#fastVae").checked, vdn: model === "h3" && $("#vdnOn").checked,
+                 upscale: model === "ltx" && $("#ltxUp").checked, fast_vae: model === "h3" && $("#fastVae").checked, vdn: model === "h3" && $("#vdnOn").checked,
                  bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
                  images: model === "qwen" ? refImages : (x.images || []),

@@ -550,6 +550,7 @@ def model_avail():
         "turbo": (m / "larryvrh").is_dir(),
         "vdn": (m / "OpenVDN").is_dir(),
         "fast_vae": (m / "Efficient-Large-Model").is_dir(),
+        "ltx_upscale": ltx_upscaler_ok(),
         "ref2va_turbo": (m / "lightx2v").is_dir(),
         "pika_fl2va": pika.is_dir() and any(pika.glob("**/fl2va*")),
         "pika_ref2va": pika.is_dir() and any(pika.glob("**/ref2va*")),
@@ -657,6 +658,44 @@ def apply_extras(pipe, engine, vdn, fast_vae):
             s["config"]["linear_branch"] = VDN_BRANCH
         if fast_vae and s["type"] == "vae-decode":
             s["config"]["fast_decoder"] = FAST_VAE
+
+
+LTX_UPSCALER_DIR = WORK / "models" / "Lightricks" / "LTX-2.5"   # latent_upscale_models/ + vae/
+
+
+def ltx_upscaler_ok():
+    d = LTX_UPSCALER_DIR
+    return (d / "vae").exists() and any((d / "latent_upscale_models").glob("*spatial*x2*.safetensors"))
+
+
+def apply_ltx_upscale(pipe):
+    """Twice the picture in latent space (960x544 -> 1920x1088): one stage
+    between generate-video and vae-decode. The denoise is unchanged; the
+    decode runs over four times the pixels."""
+    if not ltx_upscaler_ok():
+        raise ValueError("還沒有 LTX 放大模型（models/Lightricks/LTX-2.5/latent_upscale_models）")
+    out, gen = [], None
+    for s in pipe["stages"]:
+        if s["type"] == "generate-video":
+            gen = s["id"]
+        if s["type"] == "vae-decode":
+            out.append({"id": "upscale", "type": "ltx-2.5-latent-upscale",
+                        "iports": [{"src": gen, "oport": 0}],
+                        "config": {"hf_dir": "./models/Lightricks/LTX-2.5", "mode": "spatial",
+                                   "unload_when_idle": "park"}})
+            s["iports"][0] = {"src": "upscale", "oport": 0}
+        out.append(s)
+    pipe["stages"] = out
+
+
+def set_video_bitrate(pipe, w, h):
+    """vpipe's save-video defaults to 2 Mbit/s whatever the frame size, which
+    smears skin and hair at 832x480 already and starves 1080p. About 20 bits
+    per pixel-second of h264 keeps what the model drew."""
+    rate = max(8_000_000, min(40_000_000, int(w * h * 20)))
+    for s in pipe["stages"]:
+        if s["type"] == "save-video":
+            s["config"].setdefault("video", {})["bitrate"] = rate
 
 
 LORA_DIR = WORK / "models" / "lora"   # drop your own H3 .safetensors LoRAs here
@@ -1030,6 +1069,12 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         for s in pipe["stages"]:
             if s["id"] == "save-video":
                 s["config"]["enable_audio"] = False
+    upscale = False
+    if model == "ltx" and body.get("upscale"):
+        apply_ltx_upscale(pipe)
+        upscale = True
+    if model in VIDEO_MODELS:
+        set_video_bitrate(pipe, w * (2 if upscale else 1), h * (2 if upscale else 1))
     pipe_path = JOBS / job_id / "pipeline.vpipeline"
     pipe_path.write_text(json.dumps(pipe, ensure_ascii=False, indent=2))
     job = {"id": job_id, "model": model, "size": size_key,
@@ -1042,6 +1087,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "lora": user_lora, "lora_scale": lora_scale if user_lora else None,
            "vdn": bool(body.get("vdn")) if model == "h3" else None,
            "fast_vae": bool(body.get("fast_vae")) if model == "h3" else None,
+           "upscale": upscale if model == "ltx" else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
            **estimate(model, w, h, seconds, steps)}
