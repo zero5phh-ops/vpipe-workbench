@@ -247,6 +247,11 @@
           <option value="4">4 步</option><option value="6" selected>6 步</option><option value="8">8 步</option>
         </select></label>
       </div>
+      <div class="fields" id="loraRow">
+        <label class="fld"><span>人物 LoRA</span><select id="lora"><option value="">不使用</option></select></label>
+        <label class="fld"><span>LoRA 強度</span><input type="number" id="loraScale" min="0.1" max="2" step="0.1" value="1"></label>
+      </div>
+      <div class="hint" id="loraHint" hidden></div>
       <div class="fld wide" id="secRow"><span>秒數 <b id="secVal">3</b> 秒</span>
         <input type="range" id="seconds" min="1" max="10" step="1" value="3"></div>
     </div>
@@ -426,6 +431,8 @@ function renderSizes() {
   $("#audRow").hidden = !isVid(model);
   $("#stepRow").hidden = model !== "h3";
   $("#stepRow2").hidden = model !== "h3";
+  $("#loraRow").hidden = model !== "h3";
+  $("#loraHint").hidden = model !== "h3";
   $("#dlgRow").hidden = !isVid(model);
   $("#draftRow").hidden = !isVid(model);
   // LTX here: plain text or a first frame only (no last frame, no references yet)
@@ -486,7 +493,18 @@ function syncAccelForEngine() {
     if (ok) setAccel(ok.value);
   }
 }
+function renderLoras() {
+  const sel = $("#lora"), keep = sel.value, list = cfg.loras || [];
+  sel.innerHTML = '<option value="">不使用</option>' + list.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n.replace(/\.safetensors$/, ""))}</option>`).join("");
+  sel.value = list.includes(keep) ? keep : "";
+  $("#loraScale").disabled = !sel.value;
+  $("#loraHint").textContent = list.length
+    ? "自己訓練的 H3 LoRA，會和加速一起掛上。prompt 裡要寫訓練時的觸發詞。"
+    : `把 H3 的 LoRA（.safetensors）放進 ${cfg.lora_dir || "~/vpipe-work/models/lora"}，重新整理頁面就會出現在這裡。`;
+}
+$("#lora").onchange = () => { $("#loraScale").disabled = !$("#lora").value; };
 function applyAvail() {
+  renderLoras();
   const a = cfg.avail || {};
   const lb = document.querySelector('#model [data-v="ltx"]');
   lb.disabled = a.ltx === false; lb.title = a.ltx === false ? "LTX-2.5 模型或外掛還沒裝好" : "";
@@ -730,6 +748,7 @@ $("#run").onclick = async () => {
   const prompt = [$("#prompt").value.trim(), x.roleNote, dialogueNote(), audioNote()].filter(Boolean).join("\n");
   const body = { model, size, seconds: +$("#seconds").value, prompt,
                  audio: isVid(model) ? $("#audioOn").checked : true,
+                 lora: model === "h3" ? $("#lora").value || null : null, lora_scale: +$("#loraScale").value || 1,
                  steps: effSteps(), accel, engine: engine === "ref2va" ? "ref2va" : "like", draft: isDraft(),
                  bgm: isVid(model) && $("#audioOn").checked && $("#bgmOn").checked,
                  seed: $("#seedSel").value === "random" ? null : ($("#seed").value || null),
@@ -1241,6 +1260,7 @@ async function loadHist() {
       : j.model === "h3"
       ? ` · ${j.real_seconds} 秒` + (j.draft ? " · 草稿" : "") + (j.steps ? ` · ${j.steps} 步 · ${({turbo: "Turbo", pika: "Pika", none: "不加速"})[j.accel] || (j.turbo === false ? "不加速" : "Turbo")}` : "")
         + (j.engine === "ref2va" ? " · Ref2VA" : "")
+        + (j.lora ? ` · LoRA ${escapeHtml(j.lora.replace(/\.safetensors$/, ""))} ×${j.lora_scale}` : "")
         + (j.audio === false ? " · 無聲" : j.bgm ? " · 有配樂" : "") : "";
     el.innerHTML = `${media}<div class="meta"><p></p>
       <span class="tag ${j.state}">${names[j.state] || j.state}</span>

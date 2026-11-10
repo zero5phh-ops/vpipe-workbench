@@ -634,6 +634,32 @@ def apply_accel(pipe, accel, engine, steps):
     return steps
 
 
+LORA_DIR = WORK / "models" / "lora"   # drop your own H3 .safetensors LoRAs here
+
+
+def list_loras():
+    if not LORA_DIR.is_dir():
+        return []
+    return sorted(f.name for f in LORA_DIR.glob("*.safetensors") if f.is_file() and not f.name.startswith("."))
+
+
+def apply_user_lora(pipe, name, scale):
+    """A character / style LoRA of the user's own, beside the speed-up adapter.
+    vpipe reads musubi-tuner, kohya, ai-toolkit and diffusers files as they
+    are; the speed-up keeps slot `lora`, this one takes the next slot."""
+    if name not in list_loras():   # also keeps the name inside LORA_DIR
+        raise ValueError("找不到這個 LoRA 檔（放在 models/lora 資料夾裡的 .safetensors）")
+    if not (0.1 <= scale <= 2.0):
+        raise ValueError("LoRA 強度要在 0.1–2.0 之間")
+    for s in pipe["stages"]:
+        if s["id"] == "minimax-h3-model-config":
+            slot = "lora2" if s["config"].get("lora") else "lora"
+            s["config"][slot] = str(LORA_DIR / name)
+            s["config"][slot + "_scale"] = scale
+            return
+    raise ValueError("這個流程不能掛 LoRA")
+
+
 def _image_ext(raw):
     """'.png' / '.jpg' / '.webp' from the bytes themselves, or a refusal: vpipe
     carries on WITHOUT a picture it cannot read, so a bad upload must stop here."""
@@ -912,6 +938,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
     else:
         pipe, out = build_pipeline(job_id, model, w, h, seconds, prompt, seed)
     steps, turbo, accel, engine = 8, True, "turbo", "fl2va"
+    user_lora, lora_scale = None, None
     if model == "h3":
         steps = int(body.get("steps") or 6)
         if steps not in (4, 6, 8):
@@ -923,6 +950,13 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
         check_weights("pika" if engine == "ref2va" else accel, engine)
         steps = apply_accel(pipe, accel, engine, steps)
         apply_ane(pipe)
+        if body.get("lora"):
+            user_lora = str(body["lora"])
+            try:
+                lora_scale = float(body.get("lora_scale") or 1.0)
+            except (TypeError, ValueError):
+                raise ValueError("LoRA 強度要在 0.1–2.0 之間")
+            apply_user_lora(pipe, user_lora, lora_scale)
         if ref_video:
             for st_ in pipe["stages"]:
                 if st_["id"] == "video-ref-encoder":
@@ -944,6 +978,7 @@ def _prepare_job(job_id, body, model, size_key, w, h, prompt, seconds, seed):
            "audio": audio, "bgm": bool(body.get("bgm")),
            "steps": steps, "turbo": turbo if model != "ltx" else None, "accel": accel if model == "h3" else None,
            "ane": ANE_ON if model == "h3" else None,
+           "lora": user_lora, "lora_scale": lora_scale if user_lora else None,
            "engine": engine if model == "h3" and refs else None,
            "ref_video": ref_video,
            **estimate(model, w, h, seconds, steps)}
@@ -1526,7 +1561,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/config":
             sizes = {m: {k: list(v) for k, v in s.items()} for m, s in SIZES.items()}
             avail = model_avail()
-            return self._json({"sizes": sizes, "avail": avail})
+            return self._json({"sizes": sizes, "avail": avail, "loras": list_loras(),
+                               "lora_dir": str(LORA_DIR).replace(str(Path.home()), "~")})
         if p == "/api/estimate":
             q = {k: v[0] for k, v in parse_qs(urlsplit(self.path).query).items()}
             m = q.get("model", "h3")
